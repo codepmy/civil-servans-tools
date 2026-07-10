@@ -1,0 +1,138 @@
+/* 公考小工具 全局样式表 */
+
+QMainWindow {
+    background-color: #f5f5f5;
+}
+
+QToolBar {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 4px;
+    spacing: 8px;
+}
+
+QPushButton {
+    background-color: #f0f0f0;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    padding: 5px 14px;
+    font-size: 13px;
+}
+
+QPushButton:hover {
+    background-color: #e0e0e0;
+}
+
+QPushButton:pressed {
+    background-color: #d0d0d0;
+}
+
+QPushButton:disabled {
+    color: #8a8a8a;
+    background-color: #eeeeee;
+}
+
+QWidget#home-page {
+    background-color: #f7f8fb;
+}
+
+QLabel#home-title {
+    font-size: 30px;
+    font-weight: bold;
+    color: #202124;
+}
+
+QLabel#home-subtitle {
+    font-size: 14px;
+    color: #666666;
+}
+
+QLabel#tool-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #202124;
+    padding-left: 4px;
+}
+
+QPushButton#tool-card-primary {
+    background-color: #FFF3E0;
+    border: 1px solid #FF9800;
+    border-radius: 6px;
+    padding: 16px;
+    font-size: 18px;
+    font-weight: bold;
+    color: #202124;
+    text-align: center;
+}
+
+QPushButton#tool-card-primary:hover {
+    background-color: #FFE0B2;
+    border-color: #F57C00;
+}
+
+QPushButton#tool-card-primary:pressed {
+    background-color: #FFCC80;
+}
+
+QPushButton#tool-card-pending {
+    background-color: #E8F5E9;
+    border: 1px solid #4CAF50;
+    border-radius: 6px;
+    padding: 16px;
+    font-size: 18px;
+    font-weight: bold;
+    color: #6a756d;
+    text-align: center;
+}
+
+QPushButton#tool-card-pending:hover {
+    background-color: #C8E6C9;
+    border-color: #43A047;
+}
+
+QPushButton#tool-card-pending:disabled {
+    color: #7f8a82;
+    background-color: #eef7ef;
+    border-color: #a5d6a7;
+}
+
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+}
+
+QScrollArea {
+    border: none;
+}
+
+QComboBox, QSpinBox, QDoubleSpinBox {
+    padding: 3px 6px;
+    border: 1px solid #d0d0d0;
+    border-radius: 3px;
+    background-color: white;
+}
+
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+    border-color: #0078D4;
+}
+
+QStatusBar {
+    background-color: #ffffff;
+    border-top: 1px solid #e0e0e0;
+    padding: 2px 8px;
+}
+
+QLabel#preview-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #333;
+}

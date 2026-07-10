@@ -1,0 +1,120 @@
+{
+    "_说明": "行测(行政职业能力测验)标准答题纸格式模板。修改此文件可自定义默认排版参数。",
+    "_版本": "1.0",
+    "_适用": "行测选择题，包括常识判断、言语理解、数量关系、判断推理、资料分析等",
+
+    "name": "行测标准格式",
+    "exam_type": "xingce",
+    "description": "国家公务员考试《行政职业能力测验》标准答题纸格式",
+
+    "page": {
+        "_说明": "=== 页面设置 ===",
+        "size": "A4",
+        "_size说明": "纸张大小: A4|A3|B5",
+        "width_mm": 210,
+        "_width_mm说明": "页面宽度(毫米), A4标准=210",
+        "height_mm": 297,
+        "_height_mm说明": "页面高度(毫米), A4标准=297",
+
+        "margins": {
+            "_说明": "=== 页边距(毫米) ===",
+            "top_mm": 25,
+            "_top_mm说明": "上边距，通常25mm，留出页眉空间",
+            "bottom_mm": 20,
+            "_bottom_mm说明": "下边距，通常20mm，留出页码空间",
+            "left_mm": 30,
+            "_left_mm说明": "左边距，通常30mm，方便装订",
+            "right_mm": 25,
+            "_right_mm说明": "右边距，通常25mm"
+        }
+    },
+
+    "fonts": {
+        "_说明": "=== 字体设置(字体名 + 字号pt) ===",
+        "_字体来源": "默认使用Windows系统字体: SimSun(宋体)|SimHei(黑体)|KaiTi(楷体)|FangSong(仿宋)",
+        "_字号参考": "五号=10.5pt, 小四=12pt, 四号=14pt, 小三=15pt",
+
+        "header": {
+            "_说明": "页眉: 每页顶部中央显示的标题",
+            "family": "SimHei",
+            "_family说明": "页眉字体: SimHei=黑体, SimSun=宋体, 或任意已安装中文字体",
+            "size_pt": 12,
+            "_size_pt说明": "页眉字号(pt)，真题通常为12pt(小四)",
+            "bold": true,
+            "_bold说明": "是否加粗"
+        },
+        "question_number": {
+            "_说明": "题号: 如 '1.' '2.' 等",
+            "family": "SimHei",
+            "_family说明": "题号字体，通常与页眉一致用黑体",
+            "size_pt": 10.5,
+            "_size_pt说明": "题号字号，通常与正文一致10.5pt(五号)",
+            "bold": true
+        },
+        "question_stem": {
+            "_说明": "题干正文: 题目的文字内容",
+            "family": "SimSun",
+            "_family说明": "题干字体: SimSun=宋体(真题标准), FangSong=仿宋",
+            "size_pt": 10.5,
+            "_size_pt说明": "题干字号: 10.5pt=五号(真题标准)",
+            "bold": false
+        },
+        "option": {
+            "_说明": "选项: A/B/C/D 四个选项的文字",
+            "family": "SimSun",
+            "_family说明": "选项字体，通常与题干一致用宋体",
+            "size_pt": 10.5,
+            "_size_pt说明": "选项字号，与题干一致",
+            "bold": false
+        },
+        "page_number": {
+            "_说明": "页码: 页面底部中央的页码",
+            "family": "SimSun",
+            "size_pt": 9,
+            "_size_pt说明": "页码字号，通常比正文小，如9pt",
+            "bold": false
+        }
+    },
+
+    "spacing": {
+        "_说明": "=== 间距设置 ===",
+        "line_height_multiplier": 1.5,
+        "_line_height_multiplier说明": "行距倍数。1.0=单倍行距, 1.5=1.5倍行距(接近真题), 2.0=双倍行距",
+        "paragraph_spacing_mm": 2.0,
+        "_paragraph_spacing_mm说明": "段落间距(毫米)，题干与选项之间的额外空白",
+        "question_spacing_mm": 5.0,
+        "_question_spacing_mm说明": "题间间距(毫米)，上一题结束到下一题开始的距离",
+        "option_indent_mm": 8.0,
+        "_option_indent_mm说明": "选项缩进(毫米)，选项A/B/C/D相对题干左边界的缩进距离",
+        "answer_line_spacing_mm": 8.0,
+        "_answer_line_spacing_mm说明": "答案线间隔(毫米)，选项结束到答案横线的距离"
+    },
+
+    "layout": {
+        "_说明": "=== 布局选项 ===",
+        "option_layout": "vertical",
+        "_option_layout说明": "选项排列方式: vertical=竖排(A一行,B一行,C一行,D一行), two_column=双栏(AB一行,CD一行)",
+        "show_answer_line": false,
+        "_show_answer_line说明": "是否在每题后显示答案横线(用于手写答案)。默认关闭",
+        "show_page_number": true,
+        "_show_page_number说明": "是否在页面底部显示页码",
+        "show_header": false,
+        "_show_header说明": "是否在每页顶部显示页眉(如'行政职业能力测验')。默认关闭",
+        "header_text": "行政职业能力测验",
+        "_header_text说明": "页眉显示的文字内容",
+        "two_column_threshold_chars": 40,
+        "_two_column_threshold_chars说明": "双栏阈值: 选项文字超过此字符数仍用双栏可能显示不全，会自动回退竖排"
+    },
+
+    "numbering": {
+        "_说明": "=== 题号/选项编号格式 ===",
+        "question_prefix": "",
+        "_question_prefix说明": "题号前缀，如设置为'第'则显示'第1.'",
+        "question_suffix": ".",
+        "_question_suffix说明": "题号后缀: '.'=半角点号, '．'=全角点号, '、'=顿号, ')'=右括号",
+        "option_labels": ["A", "B", "C", "D"],
+        "_option_labels说明": "选项标签列表，默认ABCD四个",
+        "option_suffix": ".",
+        "_option_suffix说明": "选项后缀: '.'=半角点号, '．'=全角点号, ')'=右括号"
+    }
+}
