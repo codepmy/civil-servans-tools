@@ -1,0 +1,121 @@
+{
+    "_说明": "申论标准答题纸格式模板。修改此文件可自定义默认排版参数。",
+    "_版本": "1.0",
+    "_适用": "申论考试，包括给定资料(阅读材料)和作答要求(写作题)",
+
+    "name": "申论标准格式",
+    "exam_type": "shenlun",
+    "description": "国家公务员考试《申论》标准答题纸格式",
+
+    "page": {
+        "_说明": "=== 页面设置 ===",
+        "size": "A4",
+        "_size说明": "纸张大小: A4|A3|B5",
+        "width_mm": 210,
+        "_width_mm说明": "页面宽度(毫米), A4标准=210",
+        "height_mm": 297,
+        "_height_mm说明": "页面高度(毫米), A4标准=297",
+
+        "margins": {
+            "_说明": "=== 页边距(毫米) ===",
+            "top_mm": 25,
+            "_top_mm说明": "上边距",
+            "bottom_mm": 25,
+            "_bottom_mm说明": "下边距，申论下边距通常略大于行测",
+            "left_mm": 30,
+            "_left_mm说明": "左边距，留出装订空间",
+            "right_mm": 25,
+            "_right_mm说明": "右边距"
+        }
+    },
+
+    "fonts": {
+        "_说明": "=== 字体设置(字体名 + 字号pt) ===",
+        "_字体来源": "默认使用Windows系统字体",
+        "_字号参考": "五号=10.5pt, 小四=12pt, 四号=14pt, 三号=16pt",
+
+        "header": {
+            "_说明": "页眉大标题: 每页顶部中央的大字标题",
+            "family": "SimHei",
+            "_family说明": "大标题字体: SimHei=黑体",
+            "size_pt": 16,
+            "_size_pt说明": "大标题字号，申论标题通常较大(16pt≈三号)",
+            "bold": true
+        },
+        "section_title": {
+            "_说明": "节标题: 如'给定资料' '作答要求'等",
+            "family": "SimHei",
+            "_family说明": "节标题字体，通常与页眉一致用黑体",
+            "size_pt": 12,
+            "_size_pt说明": "节标题字号，12pt=小四",
+            "bold": true
+        },
+        "material_text": {
+            "_说明": "给定资料正文: 阅读材料的内容",
+            "family": "KaiTi",
+            "_family说明": "材料字体: KaiTi=楷体(真题常见), SimSun=宋体, FangSong=仿宋",
+            "size_pt": 10.5,
+            "_size_pt说明": "材料字号: 10.5pt=五号",
+            "bold": false
+        },
+        "question_text": {
+            "_说明": "作答要求题目正文",
+            "family": "SimSun",
+            "_family说明": "题目字体: SimSun=宋体",
+            "size_pt": 10.5,
+            "_size_pt说明": "题目字号: 10.5pt=五号",
+            "bold": false
+        },
+        "instruction_text": {
+            "_说明": "答题说明/注意事项小字",
+            "family": "SimSun",
+            "size_pt": 9,
+            "_size_pt说明": "说明文字字号，通常比正文小",
+            "bold": false
+        },
+        "page_number": {
+            "_说明": "页码: 页面底部中央的页码",
+            "family": "SimSun",
+            "size_pt": 9,
+            "_size_pt说明": "页码字号",
+            "bold": false
+        }
+    },
+
+    "spacing": {
+        "_说明": "=== 间距设置 ===",
+        "line_height_multiplier": 2.0,
+        "_line_height_multiplier说明": "行距倍数。申论通常用较大行距(2.0倍)方便阅卷和批注",
+        "paragraph_indent_chars": 2,
+        "_paragraph_indent_chars说明": "段落首行缩进字符数，中文段落通常缩进2个字符",
+        "paragraph_spacing_mm": 3.0,
+        "_paragraph_spacing_mm说明": "段落间距(毫米)",
+        "section_spacing_mm": 8.0,
+        "_section_spacing_mm说明": "节间距(毫米)，'给定资料'与'作答要求'之间的空白",
+        "answer_grid": {
+            "_说明": "答题方格设置(申论答题纸常有方格供书写)",
+            "enabled": true,
+            "_enabled说明": "是否显示答题方格线",
+            "grid_line_spacing_mm": 8.0,
+            "_grid_line_spacing_mm说明": "方格行距(毫米), 8mm≈标准答题纸格线间距",
+            "chars_per_line": 25,
+            "_chars_per_line说明": "每行字数，申论答题纸通常25字/行",
+            "total_lines": 40,
+            "_total_lines说明": "答题区总行数"
+        }
+    },
+
+    "layout": {
+        "_说明": "=== 布局选项 ===",
+        "show_page_number": true,
+        "_show_page_number说明": "是否显示页码",
+        "show_header": true,
+        "_show_header说明": "是否显示页眉大标题'申论'",
+        "header_text": "申论",
+        "_header_text说明": "页眉显示的文字，可改为'申论答题纸'等",
+        "material_indent_chars": 2,
+        "_material_indent_chars说明": "给定资料每段首行缩进字符数",
+        "question_label_format": "第{num}题",
+        "_question_label_format说明": "作答要求题号格式，{num}会被替换为题号。如'第{num}题'→'第1题'"
+    }
+}
