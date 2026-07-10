@@ -5,8 +5,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-from core.models import LaidOutDocument, LaidOutPage, PageElement
-from core.generator.font_manager import FontManager
+from tools.pdf_converter.core.models import LaidOutDocument, LaidOutPage, PageElement
+from tools.pdf_converter.core.generator.font_manager import FontManager
 
 
 class PDFGenerator:

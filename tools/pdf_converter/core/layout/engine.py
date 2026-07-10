@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from core.models import CleanedDocument, Question, PageElement, LaidOutDocument, LaidOutPage, ImageBlock
+from tools.pdf_converter.core.models import CleanedDocument, Question, PageElement, LaidOutDocument, LaidOutPage, ImageBlock
 
 
 def _u(*codes: int) -> str:

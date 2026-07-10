@@ -31,36 +31,51 @@ class PDFPreviewWidget(QWidget):
         # 标题
         self.label_title = QLabel(self._title)
         self.label_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_title.setStyleSheet("font-weight: bold; padding: 2px;")
+        self.label_title.setStyleSheet(
+            "font-weight: 600; font-size: 13px; color: #374151; "
+            "padding: 6px 8px; background-color: #FFFFFF; "
+            "border-bottom: 1px solid #E5E7EB;"
+        )
         layout.addWidget(self.label_title)
 
         # 预览图片 (scroll area)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll_area.setStyleSheet("QScrollArea { border: 1px solid #ddd; background: #fafafa; }")
+        self.scroll_area.setStyleSheet(
+            "QScrollArea { border: 1px solid #E5E7EB; "
+            "border-radius: 4px; background-color: #F3F4F6; }"
+        )
 
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setText("请打开PDF文件")
-        self.image_label.setStyleSheet("color: #888; font-size: 14px;")
+        self.image_label.setStyleSheet("color: #9CA3AF; font-size: 14px; background: transparent;")
         self.image_label.setScaledContents(False)
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area, stretch=1)
 
         # 翻页控制
         nav_layout = QHBoxLayout()
-        nav_layout.setSpacing(8)
+        nav_layout.setSpacing(6)
+        nav_layout.setContentsMargins(0, 4, 0, 0)
 
         self.btn_prev = QPushButton("◀ 上一页")
         self.btn_prev.setEnabled(False)
+        self.btn_prev.setStyleSheet(
+            "QPushButton { padding: 4px 12px; font-size: 12px; }"
+        )
         self.btn_prev.clicked.connect(self._prev_page)
 
         self.label_page = QLabel("— / —")
         self.label_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_page.setStyleSheet("color: #6B7280; font-size: 12px;")
 
         self.btn_next = QPushButton("下一页 ▶")
         self.btn_next.setEnabled(False)
+        self.btn_next.setStyleSheet(
+            "QPushButton { padding: 4px 12px; font-size: 12px; }"
+        )
         self.btn_next.clicked.connect(self._next_page)
 
         nav_layout.addWidget(self.btn_prev)

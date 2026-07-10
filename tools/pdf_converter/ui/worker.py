@@ -2,7 +2,7 @@
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from core.pipeline import ConversionPipeline
+from tools.pdf_converter.core.pipeline import ConversionPipeline
 
 
 class ConversionWorker(QThread):

@@ -19,11 +19,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.preview_panel import PreviewPanel
-from ui.progress_dialog import ProgressDialog
-from ui.settings_panel import SettingsPanel
-from ui.toolbar import MainToolbar
-from ui.worker import ConversionWorker
+from tools.pdf_converter.ui.preview_panel import PreviewPanel
+from tools.pdf_converter.ui.progress_dialog import ProgressDialog
+from tools.pdf_converter.ui.settings_panel import SettingsPanel
+from tools.pdf_converter.ui.toolbar import MainToolbar
+from tools.pdf_converter.ui.worker import ConversionWorker
+from tools.exam_timer.ui.timer_widget import TimerWidget
 
 
 class MainWindow(QMainWindow):
@@ -40,7 +41,7 @@ class MainWindow(QMainWindow):
         self.resize(1400, 850)
         self.setMinimumSize(1000, 600)
 
-        from core.generator.font_manager import FontManager
+        from tools.pdf_converter.core.generator.font_manager import FontManager
 
         self._font_manager = FontManager()
         self._font_manager.register_all()
@@ -88,8 +89,10 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.home_page = self._create_home_page()
         self.pdf_tool_page = self._create_pdf_tool_page()
+        self.timer_tool_page = TimerWidget()
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.pdf_tool_page)
+        self.stack.addWidget(self.timer_tool_page)
         self.setCentralWidget(self.stack)
 
         self.status_bar = QStatusBar()
@@ -108,28 +111,32 @@ class MainWindow(QMainWindow):
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(title)
 
-        subtitle = QLabel("选择一个工具开始使用")
+        subtitle = QLabel("面向公务员考试备考的资料处理工具合集")
         subtitle.setObjectName("home-subtitle")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(subtitle)
 
         grid = QGridLayout()
-        grid.setHorizontalSpacing(18)
-        grid.setVerticalSpacing(18)
-        layout.addSpacing(10)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(14)
+        layout.addSpacing(14)
         layout.addLayout(grid)
         layout.addStretch(1)
 
-        tools = ["pdf格式转换"] + ["待开发中"] * 8
-        for index, name in enumerate(tools):
+        tool_names = ["📄 PDF内容格式转换", "⏱ 考试计时器", "📊 待开发",
+                      "📋 待开发", "🔧 待开发", "📖 待开发",
+                      "🎯 待开发", "💡 待开发", "⚡ 待开发"]
+        for index, name in enumerate(tool_names):
             button = QPushButton(name)
-            button.setObjectName("tool-card-primary" if index == 0 else "tool-card-pending")
-            button.setMinimumHeight(116)
+            button.setObjectName("tool-card-primary" if index <= 1 else "tool-card-pending")
+            button.setMinimumHeight(100)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             row, col = divmod(index, 3)
             grid.addWidget(button, row, col)
             if index == 0:
                 button.clicked.connect(self._show_pdf_tool)
+            elif index == 1:
+                button.clicked.connect(self._show_timer_tool)
             else:
                 button.setEnabled(False)
 
@@ -168,7 +175,14 @@ class MainWindow(QMainWindow):
         self.toolbar.show()
         self.action_open.setEnabled(True)
         self.action_save.setEnabled(True)
-        self.status_bar.showMessage("pdf格式转换 - 请打开一个PDF文件开始")
+        self.status_bar.showMessage("PDF内容格式转换 - 请打开一个PDF文件开始")
+
+    def _show_timer_tool(self):
+        self.stack.setCurrentWidget(self.timer_tool_page)
+        self.toolbar.hide()
+        self.action_open.setEnabled(False)
+        self.action_save.setEnabled(False)
+        self.status_bar.showMessage("考试计时器 - 选择考试模式开始计时")
 
     def _connect_signals(self):
         self.toolbar.home_clicked.connect(self._show_home)
@@ -318,7 +332,7 @@ class MainWindow(QMainWindow):
             self,
             "关于 公考小工具",
             "<h3>公考小工具 v1.0</h3>"
-            "<p>面向公务员考试资料处理的小工具集合。</p>"
-            "<p><b>当前工具:</b> pdf格式转换</p>"
+            "<p>面向公务员考试的小工具集合。</p>"
+            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器</p>"
             "<p><b>Python + PyQt6 + PyMuPDF + ReportLab</b></p>",
         )

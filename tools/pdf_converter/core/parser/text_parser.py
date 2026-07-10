@@ -6,8 +6,8 @@ from typing import Callable
 
 import fitz
 
-from core.models import ParsedDocument, ParsedPage, TextBlock, ImageBlock
-from core.parser.base import BaseParser
+from tools.pdf_converter.core.models import ParsedDocument, ParsedPage, TextBlock, ImageBlock
+from tools.pdf_converter.core.parser.base import BaseParser
 
 AD_KEYWORDS = [
     "关注", "公众号", "扫码", "二维码", "微信号", "微信",

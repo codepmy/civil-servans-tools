@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from core.models import ParsedDocument, CleanedDocument, Question, Option
+from tools.pdf_converter.core.models import ParsedDocument, CleanedDocument, Question, Option
 
 HEADER_CUTOFF_MM = 28.0
 FOOTER_START_MM = 270.0
