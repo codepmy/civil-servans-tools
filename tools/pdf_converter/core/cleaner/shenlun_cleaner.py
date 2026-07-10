@@ -4,7 +4,7 @@ import re
 import unicodedata
 from typing import Callable
 
-from core.models import ParsedDocument, CleanedDocument, MaterialBlock, ShenlunQuestion
+from tools.pdf_converter.core.models import ParsedDocument, CleanedDocument, MaterialBlock, ShenlunQuestion
 
 
 class ShenlunCleaner:

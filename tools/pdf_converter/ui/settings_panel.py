@@ -21,8 +21,8 @@ class _WheelBlockFilter(QObject):
 _wheel_blocker = _WheelBlockFilter()
 
 # 控件基础样式
-SPINBOX_STYLE = "QSpinBox, QDoubleSpinBox { padding: 4px 8px; font-size: 13px; min-height: 28px; }"
-COMBOBOX_STYLE = "QComboBox { padding: 4px 8px; font-size: 13px; min-height: 28px; }"
+SPINBOX_STYLE = "QSpinBox, QDoubleSpinBox { padding: 5px 10px; font-size: 13px; min-height: 28px; }"
+COMBOBOX_STYLE = "QComboBox { padding: 5px 10px; font-size: 13px; min-height: 28px; }"
 
 # 预设参数
 PRESET_GUOKAO = {
@@ -68,7 +68,7 @@ class SettingsPanel(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
 
         title = QLabel("⚙ 排版设置")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 4px;")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #111827; padding: 4px 0 6px 0;")
         main_layout.addWidget(title)
 
         scroll = QScrollArea()
@@ -91,9 +91,11 @@ class SettingsPanel(QWidget):
         self.btn_guokao.setToolTip("仿宋 四号(14pt) 行距1.2 B5纸")
         self.btn_guokao.clicked.connect(self._apply_guokao)
         self.btn_guokao.setStyleSheet(
-            "QPushButton { background-color: #FFF3E0; border: 1px solid #FF9800; "
-            "border-radius: 4px; padding: 6px; font-weight: bold; font-size: 12px; }"
-            "QPushButton:hover { background-color: #FFE0B2; }"
+            "QPushButton { background-color: #FFFFFF; border: 1px solid #E5E7EB; "
+            "border-left: 3px solid #D97706; border-radius: 6px; padding: 8px 10px; "
+            "font-weight: 600; font-size: 12px; color: #374151; }"
+            "QPushButton:hover { background-color: #FFFBEB; border-color: #D97706; "
+            "border-left: 3px solid #D97706; }"
         )
         p_layout.addWidget(self.btn_guokao)
 
@@ -101,9 +103,11 @@ class SettingsPanel(QWidget):
         self.btn_liankao.setToolTip("仿宋 小四号(12pt) 行距1.0 B5纸")
         self.btn_liankao.clicked.connect(self._apply_liankao)
         self.btn_liankao.setStyleSheet(
-            "QPushButton { background-color: #E8F5E9; border: 1px solid #4CAF50; "
-            "border-radius: 4px; padding: 6px; font-weight: bold; font-size: 12px; }"
-            "QPushButton:hover { background-color: #C8E6C9; }"
+            "QPushButton { background-color: #FFFFFF; border: 1px solid #E5E7EB; "
+            "border-left: 3px solid #059669; border-radius: 6px; padding: 8px 10px; "
+            "font-weight: 600; font-size: 12px; color: #374151; }"
+            "QPushButton:hover { background-color: #ECFDF5; border-color: #059669; "
+            "border-left: 3px solid #059669; }"
         )
         p_layout.addWidget(self.btn_liankao)
         layout.addWidget(grp_preset)
@@ -207,15 +211,13 @@ class SettingsPanel(QWidget):
         layout.addSpacing(8)
 
         btn_apply = QPushButton("▶ 应用并转换")
-        btn_apply.setStyleSheet(
-            "QPushButton { background-color: #0078D4; color: white; font-weight: bold; "
-            "padding: 8px; border-radius: 4px; font-size: 13px; }"
-            "QPushButton:hover { background-color: #106EBE; }"
-        )
+        btn_apply.setProperty("cssClass", "primary")
+        btn_apply.setMinimumHeight(36)
         btn_apply.clicked.connect(lambda: self.convert_now.emit())
         layout.addWidget(btn_apply)
 
         btn_reset = QPushButton("恢复默认值")
+        btn_reset.setProperty("cssClass", "link")
         btn_reset.clicked.connect(self._load_defaults)
         layout.addWidget(btn_reset)
 

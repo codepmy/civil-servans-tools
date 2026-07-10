@@ -16,41 +16,36 @@ class MainToolbar(QToolBar):
         super().__init__("主工具栏")
         self.setMovable(False)
 
-        self.btn_home = QPushButton("←")
+        self.btn_home = QPushButton("<")
         self.btn_home.setToolTip("返回首页")
-        self.btn_home.setFixedSize(34, 32)
+        self.btn_home.setFixedSize(40, 32)
         self.btn_home.clicked.connect(lambda: self.home_clicked.emit())
         self.btn_home.setStyleSheet(
-            "QPushButton { background-color: #FFF3E0; border: 1px solid #FF9800; "
-            "border-radius: 4px; font-weight: bold; font-size: 16px; }"
-            "QPushButton:hover { background-color: #FFE0B2; }"
+            "QPushButton { background-color: #F3F4F6; border: 1px solid #E5E7EB; "
+            "border-radius: 17px; font-weight: 600; font-size: 16px; color: #374151; }"
+            "QPushButton:hover { background-color: #E5E7EB; border-color: #D1D5DB; }"
         )
         self.addWidget(self.btn_home)
 
         self.addSeparator()
 
-        self.btn_open = QPushButton("打开PDF")
+        self.btn_open = QPushButton("📂 打开PDF")
         self.btn_open.setFixedHeight(32)
         self.btn_open.clicked.connect(self._on_open)
         self.addWidget(self.btn_open)
 
         self.addSeparator()
 
-        self.btn_convert = QPushButton("开始转换")
+        self.btn_convert = QPushButton("▶ 开始转换")
         self.btn_convert.setFixedHeight(32)
         self.btn_convert.setEnabled(False)
+        self.btn_convert.setProperty("cssClass", "primary")
         self.btn_convert.clicked.connect(lambda: self.convert_clicked.emit())
-        self.btn_convert.setStyleSheet(
-            "QPushButton { background-color: #0078D4; color: white; font-weight: bold; "
-            "border-radius: 4px; padding: 4px 16px; }"
-            "QPushButton:hover { background-color: #106EBE; }"
-            "QPushButton:disabled { background-color: #CCC; color: #888; }"
-        )
         self.addWidget(self.btn_convert)
 
         self.addSeparator()
 
-        self.btn_save = QPushButton("保存PDF")
+        self.btn_save = QPushButton("💾 保存PDF")
         self.btn_save.setFixedHeight(32)
         self.btn_save.setEnabled(False)
         self.btn_save.clicked.connect(lambda: self.save_clicked.emit())

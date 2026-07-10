@@ -3,14 +3,14 @@
 from pathlib import Path
 from typing import Callable
 
-from core.models import ParsedDocument, CleanedDocument, LaidOutDocument
-from core.parser.text_parser import TextParser
-from core.cleaner.xingce_cleaner import XingceCleaner, detect_exam_type
-from core.cleaner.shenlun_cleaner import ShenlunCleaner
-from core.layout.engine import LayoutEngine, LayoutConfig
-from core.generator.font_manager import FontManager
-from core.generator.pdf_generator import PDFGenerator
-from config.settings import load_template
+from tools.pdf_converter.core.models import ParsedDocument, CleanedDocument, LaidOutDocument
+from tools.pdf_converter.core.parser.text_parser import TextParser
+from tools.pdf_converter.core.cleaner.xingce_cleaner import XingceCleaner, detect_exam_type
+from tools.pdf_converter.core.cleaner.shenlun_cleaner import ShenlunCleaner
+from tools.pdf_converter.core.layout.engine import LayoutEngine, LayoutConfig
+from tools.pdf_converter.core.generator.font_manager import FontManager
+from tools.pdf_converter.core.generator.pdf_generator import PDFGenerator
+from tools.pdf_converter.config.settings import load_template
 
 
 class ConversionPipeline:

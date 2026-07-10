@@ -8,8 +8,8 @@ import fitz
 import numpy as np
 from typing import Callable
 
-from core.models import ParsedDocument, ParsedPage, TextBlock
-from core.parser.base import BaseParser
+from tools.pdf_converter.core.models import ParsedDocument, ParsedPage, TextBlock
+from tools.pdf_converter.core.parser.base import BaseParser
 
 
 class OCRParser(BaseParser):

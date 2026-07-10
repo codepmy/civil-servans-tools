@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Callable
 
-from core.models import ParsedDocument
+from tools.pdf_converter.core.models import ParsedDocument
 
 
 class BaseParser(ABC):
