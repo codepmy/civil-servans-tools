@@ -36,7 +36,7 @@ from tools.exam_timer.ui.timer_widget import TimerWidget
 APP_VERSION = "1.0.0"
 AUTHOR_NAME = "CodePmy"
 AUTHOR_EMAIL = "codepmy@163.com"
-UPDATE_INFO_URL = "https://gitee.com/peisuer/civil-servans-tools/raw/main/version.json"
+UPDATE_INFO_URL = "https://gitee.com/peisuer/civil-servans-tools/blob/master/version.json"
 
 
 class UpdateCheckWorker(QThread):
