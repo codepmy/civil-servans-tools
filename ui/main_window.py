@@ -36,7 +36,7 @@ from tools.exam_timer.ui.timer_widget import TimerWidget
 APP_VERSION = "1.0.0"
 AUTHOR_NAME = "CodePmy"
 AUTHOR_EMAIL = "codepmy@163.com"
-UPDATE_INFO_URL = "https://gitee.com/peisuer/civil-servans-tools/blob/master/version.json"
+UPDATE_INFO_URL = "https://gitee.com/peisuer/civil-servans-tools/raw/master/version.json"
 
 
 class UpdateCheckWorker(QThread):
@@ -57,13 +57,24 @@ class UpdateCheckWorker(QThread):
                 headers={"User-Agent": f"CivilServantsTools/{APP_VERSION}"},
             )
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                payload = response.read().decode("utf-8")
-            data = json.loads(payload)
+                payload = response.read().decode("utf-8-sig").strip()
+            if not payload:
+                raise ValueError("版本文件为空，请确认 version.json 已上传到 Gitee 仓库 master 分支")
+            if payload.startswith("<"):
+                raise ValueError("版本文件地址返回了网页内容，请确认 version.json 已上传且 raw 地址可直接访问")
+            try:
+                data = json.loads(payload)
+            except json.JSONDecodeError as exc:
+                preview = payload[:120].replace("\n", " ")
+                raise ValueError(f"版本文件不是有效 JSON：{exc.msg}。返回内容开头：{preview}") from exc
             if not isinstance(data, dict):
                 raise ValueError("版本信息格式不正确")
             self.succeeded.emit(data)
         except (urllib.error.URLError, TimeoutError) as exc:
-            self.failed.emit(f"无法连接到版本服务器：{exc}")
+            if isinstance(exc, urllib.error.HTTPError):
+                self.failed.emit(f"版本文件访问失败：HTTP {exc.code}。请确认 version.json 已上传到 Gitee 仓库 master 分支")
+            else:
+                self.failed.emit(f"无法连接到版本服务器：{exc}")
         except Exception as exc:
             self.failed.emit(f"检查更新失败：{exc}")
 
