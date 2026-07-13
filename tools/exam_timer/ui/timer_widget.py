@@ -1,6 +1,6 @@
 """考试计时器 — 大字自适应显示 + 正/倒计时 + 右侧分段列表。"""
 
-from PyQt6.QtCore import Qt, QTimer as QtFlashTimer
+from PyQt6.QtCore import Qt, QTimer as QtFlashTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup,
@@ -14,6 +14,8 @@ from tools.exam_timer.core.timer_engine import TimerEngine
 class TimerWidget(QWidget):
     """计时器主页面。"""
 
+    back_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self._engine = TimerEngine()
@@ -22,7 +24,7 @@ class TimerWidget(QWidget):
         self._flash_timer.timeout.connect(self._toggle_flash)
         self._flash_on = False
         self._is_countdown_done = False
-        self._base_font_size = 120
+        self._base_font_size = 180
 
         self._setup_ui()
         self._connect_signals()
@@ -40,9 +42,8 @@ class TimerWidget(QWidget):
 
     def _update_font_size(self):
         """根据可用高度动态计算时间字号。"""
-        # 取窗口高度扣掉上下边距和按钮区后的可用空间
-        avail = max(200, self.height() - 220)
-        size = max(72, min(int(avail * 0.42), 300))
+        avail = max(260, self.height() - 180)
+        size = max(140, min(int(avail * 0.68), 430))
         if abs(size - self._base_font_size) > 2:
             self._base_font_size = size
             self.label_time.setFont(QFont("Consolas, Microsoft YaHei", size, QFont.Weight.Bold))
@@ -64,6 +65,19 @@ class TimerWidget(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(48, 28, 48, 28)
         layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        self.btn_back = QPushButton("< 返回首页")
+        self.btn_back.setFixedSize(104, 34)
+        self.btn_back.setStyleSheet(
+            "QPushButton { background-color: #F3F4F6; border: 1px solid #E5E7EB; "
+            "border-radius: 17px; font-weight: 600; color: #374151; }"
+            "QPushButton:hover { background-color: #E5E7EB; border-color: #D1D5DB; }"
+        )
+        header.addWidget(self.btn_back)
+        header.addStretch()
+        layout.addLayout(header)
 
         # 模式切换
         layout.addLayout(self._build_mode_switch())
@@ -95,7 +109,7 @@ class TimerWidget(QWidget):
         # ═══ 大号时间 ═══
         self.label_time = QLabel("00 : 00 : 00")
         self.label_time.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_time.setFont(QFont("Consolas, Microsoft YaHei", 120, QFont.Weight.Bold))
+        self.label_time.setFont(QFont("Consolas, Microsoft YaHei", 180, QFont.Weight.Bold))
         self.label_time.setStyleSheet("color: #1F2937;")
         # 让 label 尽可能扩展以填充空间
         self.label_time.setSizePolicy(
@@ -269,6 +283,7 @@ class TimerWidget(QWidget):
         self.btn_pause.clicked.connect(lambda: self._engine.pause())
         self.btn_lap.clicked.connect(lambda: self._engine.record_lap())
         self.btn_reset.clicked.connect(self._on_reset)
+        self.btn_back.clicked.connect(self.back_requested.emit)
 
         for spin in (self.spin_h, self.spin_m, self.spin_s):
             spin.valueChanged.connect(self._on_countdown_target_changed)
