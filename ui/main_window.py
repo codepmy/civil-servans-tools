@@ -422,6 +422,7 @@ class MainWindow(QMainWindow):
         download_url = str(data.get("downloadUrl", "")).strip()
         mandatory = bool(data.get("mandatory", False))
         mandatory_text = "是" if mandatory else "否"
+        download_text = f"\n下载地址：{download_url}" if download_url else ""
 
         message = QMessageBox(self)
         message.setIcon(QMessageBox.Icon.Information)
@@ -432,6 +433,7 @@ class MainWindow(QMainWindow):
             f"发布日期：{release_date}\n"
             f"强制更新：{mandatory_text}\n\n"
             f"更新内容：\n{changelog}"
+            f"{download_text}"
         )
         open_button = None
         if download_url:
@@ -440,7 +442,15 @@ class MainWindow(QMainWindow):
         message.exec()
 
         if open_button and message.clickedButton() == open_button:
-            QDesktopServices.openUrl(QUrl(download_url))
+            self._open_download_url(download_url)
+
+    def _open_download_url(self, download_url: str):
+        url = QUrl.fromUserInput(download_url)
+        if not url.isValid() or not url.scheme():
+            QMessageBox.warning(self, "打开下载页", f"下载地址无效：\n{download_url}")
+            return
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.warning(self, "打开下载页", f"无法打开浏览器，请手动访问：\n{download_url}")
 
     def _on_update_check_failed(self, error_msg: str):
         QMessageBox.warning(self, "检查更新", error_msg)
