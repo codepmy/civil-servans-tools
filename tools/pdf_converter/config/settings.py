@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 
+from app_paths import resource_path
+
 
 # 默认模板目录
-TEMPLATES_DIR = Path(__file__).parent / "templates"
+TEMPLATES_DIR = resource_path("tools", "pdf_converter", "config", "templates")
 
 
 def load_template(exam_type: str) -> dict:

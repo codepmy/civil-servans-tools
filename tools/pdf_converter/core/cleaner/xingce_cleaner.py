@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Callable
 
+from app_paths import resource_path
 from tools.pdf_converter.core.models import ParsedDocument, CleanedDocument, Question, Option
 
 HEADER_CUTOFF_MM = 28.0
@@ -183,7 +183,7 @@ class XingceCleaner:
 
     @staticmethod
     def _load_patterns(filename: str, defaults: tuple[str, ...]) -> list[re.Pattern]:
-        config_path = Path(__file__).resolve().parents[2] / "config" / filename
+        config_path = resource_path("tools", "pdf_converter", "config", filename)
         patterns = list(defaults)
         try:
             raw = config_path.read_text(encoding="utf-8")
