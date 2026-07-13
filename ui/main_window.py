@@ -1,12 +1,13 @@
 """Main window for the civil-service exam utility toolbox."""
 
+import html
 import json
 import os
 import traceback
 import urllib.error
 import urllib.request
 
-from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtWidgets import (
     QFileDialog,
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app_paths import resource_path
 from tools.pdf_converter.ui.preview_panel import PreviewPanel
 from tools.pdf_converter.ui.progress_dialog import ProgressDialog
 from tools.pdf_converter.ui.settings_panel import SettingsPanel
@@ -33,10 +35,41 @@ from tools.answer_sheet.ui.widget import AnswerSheetWidget
 from tools.exam_timer.ui.timer_widget import TimerWidget
 
 
-APP_VERSION = "1.0.0"
-AUTHOR_NAME = "CodePmy"
-AUTHOR_EMAIL = "codepmy@163.com"
-UPDATE_INFO_URL = "https://gitee.com/peisuer/civil-servans-tools/raw/master/version.json"
+DEFAULT_APP_METADATA = {
+    "version": "1.0.0",
+    "authorName": "CodePmy",
+    "authorEmail": "codepmy@163.com",
+    "updateInfoUrl": "https://gitee.com/peisuer/civil-servans-tools/raw/master/version.json",
+}
+
+
+def _load_app_metadata() -> dict:
+    data = dict(DEFAULT_APP_METADATA)
+    try:
+        path = resource_path("version.json")
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            for key in data:
+                value = str(loaded.get(key, "")).strip()
+                if value:
+                    data[key] = value
+    except Exception:
+        pass
+    return data
+
+
+APP_METADATA = _load_app_metadata()
+APP_VERSION = APP_METADATA["version"]
+AUTHOR_NAME = APP_METADATA["authorName"]
+AUTHOR_EMAIL = APP_METADATA["authorEmail"]
+UPDATE_INFO_URL = APP_METADATA["updateInfoUrl"]
+PRIMARY_BUTTON_STYLE = (
+    "QPushButton { background-color: #4F46E5; color: #FFFFFF; border: none; "
+    "border-radius: 6px; padding: 6px 14px; font-size: 13px; font-weight: 600; min-height: 28px; }"
+    "QPushButton:hover { background-color: #4338CA; }"
+    "QPushButton:pressed { background-color: #3730A3; }"
+    "QPushButton:disabled { background-color: #C7D2FE; color: #FFFFFF; }"
+)
 
 
 class UpdateCheckWorker(QThread):
@@ -89,6 +122,7 @@ class MainWindow(QMainWindow):
         self._worker: ConversionWorker | None = None
         self._progress_dialog: ProgressDialog | None = None
         self._update_worker: UpdateCheckWorker | None = None
+        self._update_check_silent = False
 
         self.setWindowTitle("公考小工具")
         self.resize(1400, 850)
@@ -102,6 +136,7 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._connect_signals()
+        QTimer.singleShot(800, lambda: self._check_updates(silent=True))
 
     def _setup_ui(self):
         menubar = self.menuBar()
@@ -385,13 +420,17 @@ class MainWindow(QMainWindow):
                 pass
             self._progress_dialog = None
 
-    def _check_updates(self):
+    def _check_updates(self, silent: bool = False):
         if self._update_worker and self._update_worker.isRunning():
+            if silent:
+                return
             QMessageBox.information(self, "检查更新", "正在检查更新，请稍候。")
             return
 
-        self.action_check_updates.setEnabled(False)
-        self.status_bar.showMessage("正在检查更新...")
+        self._update_check_silent = silent
+        if not silent:
+            self.action_check_updates.setEnabled(False)
+            self.status_bar.showMessage("正在检查更新...")
         self._update_worker = UpdateCheckWorker(UPDATE_INFO_URL)
         self._update_worker.succeeded.connect(self._on_update_info_loaded)
         self._update_worker.failed.connect(self._on_update_check_failed)
@@ -401,6 +440,8 @@ class MainWindow(QMainWindow):
     def _on_update_info_loaded(self, data: dict):
         remote_version = str(data.get("version", "")).strip()
         if not remote_version:
+            if self._update_check_silent:
+                return
             QMessageBox.warning(self, "检查更新", "版本信息文件中缺少 version 字段。")
             self.status_bar.showMessage("检查更新失败：版本信息不完整")
             return
@@ -409,6 +450,8 @@ class MainWindow(QMainWindow):
             self._show_update_available(data, remote_version)
             self.status_bar.showMessage(f"发现新版本 {remote_version}")
         else:
+            if self._update_check_silent:
+                return
             QMessageBox.information(
                 self,
                 "检查更新",
@@ -422,22 +465,29 @@ class MainWindow(QMainWindow):
         download_url = str(data.get("downloadUrl", "")).strip()
         mandatory = bool(data.get("mandatory", False))
         mandatory_text = "是" if mandatory else "否"
-        download_text = f"\n下载地址：{download_url}" if download_url else ""
+        changelog_html = html.escape(changelog).replace("\n", "<br>")
+        download_html = f"<br><br>下载地址：{html.escape(download_url)}" if download_url else ""
 
         message = QMessageBox(self)
         message.setIcon(QMessageBox.Icon.Information)
         message.setWindowTitle("发现新版本")
-        message.setText(f"发现新版本 {remote_version}")
+        message.setTextFormat(Qt.TextFormat.RichText)
+        message.setText(
+            f"发现新版本 {html.escape(remote_version)}<br><br>"
+            "<span style='color:#B91C1C; font-size:15px; font-weight:700;'>请先卸载旧版本</span>"
+        )
         message.setInformativeText(
-            f"当前版本：{APP_VERSION}\n"
-            f"发布日期：{release_date}\n"
-            f"强制更新：{mandatory_text}\n\n"
-            f"更新内容：\n{changelog}"
-            f"{download_text}"
+            f"当前版本：{html.escape(APP_VERSION)}<br>"
+            f"发布日期：{html.escape(release_date)}<br>"
+            f"强制更新：{html.escape(mandatory_text)}<br><br>"
+            f"更新内容：<br>{changelog_html}"
+            f"{download_html}"
         )
         open_button = None
         if download_url:
             open_button = message.addButton("打开下载页", QMessageBox.ButtonRole.AcceptRole)
+            open_button.setProperty("cssClass", "primary")
+            open_button.setStyleSheet(PRIMARY_BUTTON_STYLE)
         message.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
         message.exec()
 
@@ -453,6 +503,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "打开下载页", f"无法打开浏览器，请手动访问：\n{download_url}")
 
     def _on_update_check_failed(self, error_msg: str):
+        if self._update_check_silent:
+            return
         QMessageBox.warning(self, "检查更新", error_msg)
         self.status_bar.showMessage("检查更新失败")
 
@@ -461,6 +513,7 @@ class MainWindow(QMainWindow):
         if self._update_worker:
             self._update_worker.deleteLater()
         self._update_worker = None
+        self._update_check_silent = False
 
     @staticmethod
     def _is_newer_version(remote: str, current: str) -> bool:
