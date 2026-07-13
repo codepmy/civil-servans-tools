@@ -4,6 +4,7 @@ __pycache__/
 dist/
 build/
 *.spec
+!main.spec
 *.exe
 output/*
 !output/.gitkeep

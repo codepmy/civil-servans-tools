@@ -178,6 +178,12 @@ class QuestionRow(QFrame):
         self.word_spin.setRange(1, 10000)
         self.word_spin.setValue(word_count)
         self.word_spin.setSuffix(" 字")
+        self.word_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.word_spin.setStyleSheet(
+            "QSpinBox { background: #FFFFFF; border: 1px solid #D1D5DB; "
+            "border-radius: 5px; padding: 5px 8px; }"
+            "QSpinBox:focus { border-color: #4F46E5; }"
+        )
         self.word_spin.setFixedWidth(96)
         layout.addWidget(self.word_spin)
 
