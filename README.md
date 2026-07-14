@@ -155,7 +155,7 @@ CivilServantsTools/
 如果小工具有帮到您，也欢迎请作者一杯咖啡。
 
 
-![小工具 作者支持渠道](./author-support-poster.png)
+![小工具 作者支持渠道](./resources/author-support-poster.png)
 ## 👨‍💻 关于作者
 
 - **开发者**：CodePmy
