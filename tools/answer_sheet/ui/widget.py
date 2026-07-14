@@ -395,7 +395,7 @@ class AnswerSheetWidget(QWidget):
 
     def _connect_signals(self):
         self.btn_back.clicked.connect(self.back_requested.emit)
-        self.mode_group.idToggled.connect(lambda _id, checked: checked and self._on_changed())
+        self.mode_group.idToggled.connect(lambda _id, checked: checked and self._on_mode_changed())
         self.spin_pages.valueChanged.connect(self._on_changed)
         self.combo_font.currentTextChanged.connect(self._on_changed)
         self.slider_line_width.valueChanged.connect(self._on_line_width_changed)
@@ -404,8 +404,11 @@ class AnswerSheetWidget(QWidget):
         self.btn_export_pdf.clicked.connect(self.export_pdf)
         self.btn_export_image.clicked.connect(self.export_images)
 
-    def _on_changed(self):
+    def _on_mode_changed(self):
         self._apply_mode()
+        self.refresh_preview()
+
+    def _on_changed(self):
         self._refresh_timer.start()
 
     def _apply_mode(self):
