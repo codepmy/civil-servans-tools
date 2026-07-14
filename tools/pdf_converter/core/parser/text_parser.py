@@ -21,6 +21,7 @@ FOOTER_START_MM = 270.0
 HEADER_CUTOFF_PT = HEADER_CUTOFF_MM * 72 / 25.4
 FOOTER_START_PT = FOOTER_START_MM * 72 / 25.4
 QUESTION_NUM_RE = re.compile(r"^\s*\d+\s*[\.．、。]")
+OPTION_RE = re.compile(r"^\s*[A-D]\s*[\.．\)）]")
 SECTION_RE = re.compile(r"^[一二三四五六七八九十]+[\.．、。]\s*")
 FOOTER_CONTENT_RE = re.compile(r"^(?:第\s*[一二三四五六七八九十百两0-9\d]+\s*(?:大)?题|作答要求|给定(?:资料|材料)|材料\s*\d*)")
 
@@ -108,7 +109,18 @@ class TextParser(BaseParser):
     def _is_content_line_near_footer(text: str, y_mm: float, page_height_mm: float) -> bool:
         if y_mm > page_height_mm - 12.0:
             return False
-        return bool(FOOTER_CONTENT_RE.match(text or ""))
+        stripped = (text or "").strip()
+        if not stripped:
+            return False
+        if FOOTER_CONTENT_RE.match(stripped):
+            return True
+        if QUESTION_NUM_RE.match(stripped) or OPTION_RE.match(stripped):
+            return True
+        if re.match(r"^[-—–]?\s*\d+\s*[-—–]?$", stripped) and len(stripped) < 10:
+            return False
+        if any(keyword in stripped for keyword in AD_KEYWORDS):
+            return False
+        return len(stripped) >= 12
 
     def _extract_visual_blocks(self, page: fitz.Page, page_rect: fitz.Rect,
                                page_index: int) -> list[ImageBlock]:
@@ -165,7 +177,11 @@ class TextParser(BaseParser):
         result: list[ImageBlock] = []
         page_area = page_rect.get_area()
         for rect in self._merge_rects(rects, page_rect, gap=4):
-            if rect.y0 < HEADER_CUTOFF_PT or rect.y1 > min(FOOTER_START_PT, page_rect.height - 34):
+            rect = self._trim_rect_against_option_lines(page, rect)
+            if rect.is_empty or rect.width <= 0 or rect.height <= 0:
+                continue
+            footer_start = min(FOOTER_START_PT, page_rect.height - 34)
+            if rect.y1 <= HEADER_CUTOFF_PT or rect.y0 >= footer_start:
                 continue
             if rect.width > page_rect.width * 0.92 and rect.height > page_rect.height * 0.65:
                 continue
@@ -178,6 +194,33 @@ class TextParser(BaseParser):
             except Exception:
                 continue
         return result
+
+    @staticmethod
+    def _trim_rect_against_option_lines(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect:
+        trimmed = fitz.Rect(rect)
+        try:
+            lines = []
+            for block in page.get_text("dict").get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    text = "".join(span.get("text", "") for span in line.get("spans", [])).strip()
+                    if not OPTION_RE.match(text):
+                        continue
+                    bbox = line.get("bbox")
+                    if bbox:
+                        lines.append(fitz.Rect(bbox))
+            for line_rect in lines:
+                horizontal_overlap = min(trimmed.x1, line_rect.x1) - max(trimmed.x0, line_rect.x0)
+                if horizontal_overlap <= max(8, min(trimmed.width, line_rect.width) * 0.15):
+                    continue
+                touches_bottom = trimmed.y0 < line_rect.y0 < trimmed.y1 + 8
+                in_lower_half = line_rect.y0 > trimmed.y0 + trimmed.height * 0.35
+                if touches_bottom and in_lower_half:
+                    trimmed.y1 = min(trimmed.y1, line_rect.y0 - 4)
+        except Exception:
+            return fitz.Rect(rect)
+        return trimmed
 
     def _extract_regions_by_erasing_text(self, page: fitz.Page, page_rect: fitz.Rect,
                                          page_index: int) -> list[ImageBlock]:

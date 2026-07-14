@@ -19,6 +19,12 @@ def _u(*codes: int) -> str:
 DATA_ANALYSIS = _u(0x8D44, 0x6599, 0x5206, 0x6790)
 SHENLUN_MATERIAL = _u(0x7ED9, 0x5B9A, 0x8D44, 0x6599)
 SHENLUN_REQUIREMENT = _u(0x4F5C, 0x7B54, 0x8981, 0x6C42)
+ACCORDING_TO = _u(0x6839, 0x636E)
+BELOW = _u(0x4E0B, 0x5217)
+MATERIAL = _u(0x6750, 0x6599)
+YEAR = _u(0x5E74)
+TABLE = _u(0x8868)
+FIGURE = _u(0x56FE)
 
 
 class XingceCleaner:
@@ -26,6 +32,7 @@ class XingceCleaner:
 
     QUESTION_NUM_RE = re.compile(r"^\s*(\d+)\s*[\.\uff0e\u3001\u3002]\s*")
     OPTION_RE = re.compile(r"^\s*([A-D])\s*[\.\uff0e\)\uff09]\s*")
+    INLINE_OPTION_RE = re.compile(r"([A-D])\s*[\.\uff0e\)\uff09]\s*")
     SECTION_RE = re.compile(r"^\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+\s*[\.\uff0e\u3001\u3002]\s*")
 
     DEFAULT_SECTION_PATTERNS = (
@@ -90,7 +97,12 @@ class XingceCleaner:
 
                 is_section_instruction = self._is_section_instruction(stripped)
                 if y_mm < HEADER_CUTOFF_MM or y_mm > min(FOOTER_START_MM, page.height_mm - 12):
-                    if not is_section_instruction and not self._is_content_line_near_header(stripped, y_mm):
+                    is_content_line = (
+                        self._is_content_line_near_header(stripped, y_mm)
+                        if y_mm < HEADER_CUTOFF_MM
+                        else self._is_content_line_near_footer(stripped, y_mm, page.height_mm)
+                    )
+                    if not is_section_instruction and not is_content_line:
                         filtered_out.append(f"[header-footer] {stripped[:50]}")
                         continue
 
@@ -139,6 +151,19 @@ class XingceCleaner:
         if y_mm < 18.0:
             return False
         return bool(XingceCleaner.QUESTION_NUM_RE.match(text) or XingceCleaner.SECTION_RE.match(text))
+
+    @staticmethod
+    def _is_content_line_near_footer(text: str, y_mm: float, page_height_mm: float) -> bool:
+        if y_mm > page_height_mm - 12.0:
+            return False
+        stripped = (text or "").strip()
+        if not stripped:
+            return False
+        if XingceCleaner.QUESTION_NUM_RE.match(stripped) or XingceCleaner.OPTION_RE.match(stripped):
+            return True
+        if XingceCleaner._is_page_number(stripped):
+            return False
+        return len(stripped) >= 12
 
     @staticmethod
     def _is_page_number(text: str) -> bool:
@@ -212,6 +237,8 @@ class XingceCleaner:
         current_option: Option | None = None
         pending_sections: list[str] = []
         pending_section_xs: list[float] = []
+        pending_section_ys: list[float] = []
+        pending_section_pages: list[int] = []
         collecting_section = False
         last_question_num: int | None = None
         last_page: int | None = None
@@ -236,6 +263,8 @@ class XingceCleaner:
                 finish_current_question()
                 pending_sections.append(item[1])
                 pending_section_xs.append(item[4] if len(item) > 4 else 0.0)
+                pending_section_ys.append(item[3] if len(item) > 3 else 0.0)
+                pending_section_pages.append(item[2] if len(item) > 2 else 0)
                 if pending_source_page is None:
                     pending_source_page = item[2] if len(item) > 2 else pending_source_page
                     pending_source_y_mm = item[3] if len(item) > 3 else pending_source_y_mm
@@ -259,12 +288,16 @@ class XingceCleaner:
                 if pending_sections:
                     current_q.section_heading = "\n".join(pending_sections)
                     current_q.section_line_xs = list(pending_section_xs)
+                    current_q.section_line_ys = list(pending_section_ys)
+                    current_q.section_line_pages = list(pending_section_pages)
                     current_q.section_source_page = pending_source_page or current_page
                     current_q.section_source_y_mm = pending_source_y_mm if pending_source_y_mm is not None else y_mm
                     current_q.section_end_page = current_page
                     current_q.section_end_y_mm = y_mm
                     pending_sections = []
                     pending_section_xs = []
+                    pending_section_ys = []
+                    pending_section_pages = []
                     pending_source_page = None
                     pending_source_y_mm = None
                 collecting_section = False
@@ -274,15 +307,16 @@ class XingceCleaner:
             if collecting_section:
                 pending_sections.append(line)
                 pending_section_xs.append(x_mm)
+                pending_section_ys.append(y_mm)
+                pending_section_pages.append(current_page)
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
                 continue
 
-            opt_match = self.OPTION_RE.match(line)
-            if opt_match and current_q:
-                label = opt_match.group(1)
-                text = line[opt_match.end():].strip()
-                current_option = Option(label=label, text=text)
-                current_q.options.append(current_option)
+            inline_options = self._split_inline_options(line)
+            if inline_options and current_q:
+                for label, text in inline_options:
+                    current_option = Option(label=label, text=text)
+                    current_q.options.append(current_option)
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
                 continue
 
@@ -292,6 +326,8 @@ class XingceCleaner:
                 finish_current_question()
                 pending_sections.append(line)
                 pending_section_xs = [x_mm]
+                pending_section_ys = [y_mm]
+                pending_section_pages = [current_page]
                 pending_source_page = current_page
                 pending_source_y_mm = y_mm
                 collecting_section = True
@@ -309,6 +345,20 @@ class XingceCleaner:
 
         finish_current_question()
         return questions
+
+    @classmethod
+    def _split_inline_options(cls, line: str) -> list[tuple[str, str]]:
+        matches = list(cls.INLINE_OPTION_RE.finditer(line or ""))
+        if not matches or line[:matches[0].start()].strip():
+            return []
+        labels = [match.group(1) for match in matches]
+        if labels != sorted(labels) or len(set(labels)) != len(labels):
+            return []
+        options: list[tuple[str, str]] = []
+        for idx, match in enumerate(matches):
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(line)
+            options.append((match.group(1), line[match.end():end].strip()))
+        return options
 
     @staticmethod
     def _append_option_continuation(
@@ -349,13 +399,39 @@ class XingceCleaner:
             return False
         if [option.label for option in current_q.options] != ["A", "B", "C", "D"]:
             return False
-        if last_page == current_page and last_y_mm is not None and y_mm - last_y_mm < 8.0:
-            return False
         if re.match(r"^\s*(?:\d+|[A-D])\s*[\.\uff0e\u3001\u3002\)\uff09]", line):
             return False
         if current_option.text.rstrip().endswith(("，", "、", "；", "：", "（", "(", "-", "--")):
             return False
-        return x_mm >= 18.0 or y_mm >= 220.0
+        if XingceCleaner._looks_like_material_start(line):
+            return True
+        if last_page == current_page and last_y_mm is not None and y_mm - last_y_mm < 9.0:
+            return False
+        if last_page != current_page:
+            return XingceCleaner._looks_like_material_content(line)
+        return x_mm <= 35.0 and XingceCleaner._looks_like_material_content(line)
+
+    @staticmethod
+    def _looks_like_material_start(line: str) -> bool:
+        compact = re.sub(r"\s+", "", line or "")
+        if not compact:
+            return False
+        if compact.startswith((ACCORDING_TO, BELOW, MATERIAL, TABLE, FIGURE)):
+            return True
+        if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR), compact):
+            return True
+        return False
+
+    @staticmethod
+    def _looks_like_material_content(line: str) -> bool:
+        compact = re.sub(r"\s+", "", line or "")
+        if len(compact) < 10:
+            return False
+        if XingceCleaner.QUESTION_NUM_RE.match(compact) or XingceCleaner.OPTION_RE.match(compact):
+            return False
+        if not re.search(r"[\u4e00-\u9fff]", compact):
+            return False
+        return True
 
     @staticmethod
     def _is_next_question_number(match: re.Match, current_q: Question | None, last_question_num: int | None = None) -> bool:
