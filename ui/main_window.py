@@ -8,9 +8,10 @@ import urllib.error
 import urllib.request
 
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QDesktopServices
+from PyQt6.QtGui import QAction, QDesktopServices, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QDialog,
     QFileDialog,
     QGridLayout,
     QLabel,
@@ -150,6 +151,11 @@ class MainWindow(QMainWindow):
         action_about = QAction("关于(&A)", self)
         action_about.triggered.connect(self._show_about)
         help_menu.addAction(action_about)
+
+        # 打赏 — 紧挨着"帮助"菜单右侧
+        self.action_donate = QAction("☕ 打赏", self)
+        self.action_donate.triggered.connect(self._show_donate_dialog)
+        menubar.addAction(self.action_donate)
 
         self.toolbar = MainToolbar()
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
@@ -574,6 +580,56 @@ class MainWindow(QMainWindow):
             )
         except Exception:
             pass
+
+    def _show_donate_dialog(self):
+        poster_path = resource_path("resources", "author-support-poster.png")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("打赏作者")
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        dialog.setStyleSheet("QDialog { background-color: #FFFFFF; }")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        title = QLabel("感谢您的支持！")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 18px; font-weight: 700; color: #1F2937;")
+        layout.addWidget(title)
+
+        if poster_path.exists():
+            pixmap = QPixmap(str(poster_path))
+            if not pixmap.isNull():
+                # Scale poster to fit within a reasonable dialog size
+                scaled = pixmap.scaled(
+                    500, 650,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                image_label = QLabel()
+                image_label.setPixmap(scaled)
+                image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(image_label)
+                dialog.resize(scaled.width() + 40, scaled.height() + 80)
+            else:
+                error_label = QLabel("无法加载打赏图片")
+                error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(error_label)
+        else:
+            error_label = QLabel("打赏图片文件不存在")
+            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(error_label)
+
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet(
+            "QPushButton { background-color: #E5E7EB; color: #374151; border: none; "
+            "border-radius: 6px; padding: 6px 24px; font-size: 13px; }"
+            "QPushButton:hover { background-color: #D1D5DB; }"
+        )
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        dialog.exec()
 
     def _show_about(self):
         QMessageBox.about(

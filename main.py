@@ -24,7 +24,7 @@ def main():
     app.setApplicationName("公考小工具")
     app.setOrganizationName("pdfchange")
 
-    icon_path = resource_path("toolsIco.ico")
+    icon_path = resource_path("resources", "toolsIco.ico")
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 

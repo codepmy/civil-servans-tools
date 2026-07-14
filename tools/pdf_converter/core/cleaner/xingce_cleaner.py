@@ -203,37 +203,30 @@ class XingceCleaner:
 
     @staticmethod
     def _looks_like_meaningful_content(text: str) -> bool:
-        """Check if text inside a visual region is meaningful data-analysis content that should be preserved."""
+        """Check if text inside a visual region is meaningful content that should be preserved.
+
+        Only structural markers (table/figure captions, notes, year-marked text)
+        and longer text (>=15 chars) are preserved. Short labels, numbers, and
+        table cell data inside visual regions are treated as chart noise and
+        filtered out.
+        """
         compact = re.sub(r"\s+", "", text.strip())
         if not compact:
             return False
-        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", compact))
-        # Table headers or short material text (e.g. "\u4f01\u4e1a\u603b\u6570", "\u884c\u4e1a\u540d\u79f0")
-        if cjk_count >= 3:
-            return True
-        # Short pure-CJK table labels (e.g. "\u4e1c\u76df", "\u65e5\u672c", "\u884c\u4e1a", "\u603b\u8ba1")
-        if cjk_count >= 2 and len(compact) == cjk_count:
-            return True
-        # Table/figure captions
+        # Table/figure captions (e.g. "\u88681 2022\u5e74...", "\u56fe \u589e\u957f\u7387")
         if compact.startswith((TABLE, FIGURE)):
             return True
-        # Note text
+        # Note text (e.g. "\u6ce8\uff1a...")
         if compact.startswith(NOTE_CHAR):
             return True
-        # Year patterns like "2024\u5e74"
-        if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR), compact):
+        # Year-marked text with substantial content after the year
+        # (e.g. "2024\u5e74\u4e2d\u5173\u6751...").  Bare year labels like "2022\u5e74" that
+        # serve as table column headers are excluded.
+        if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR) + r".{3,}", compact):
             return True
-        # Table data: CJK mixed with digits (e.g. "\u571f\u6728\u5de5\u7a0b\u5efa\u7b51")
-        if cjk_count >= 2 and re.search(r"\d", compact):
-            return True
-        # Table units / parenthesized items (e.g. "\uff08\u5bb6\uff09", "\uff08\u4ebf\u5143\uff09")
-        if re.match(r"^[\uff08\(][^\)\uff09]+[\uff09\)]$", compact):
-            return True
-        # Numeric table data cells (e.g. "123.45", "-5.6%")
-        if re.match(r"^[-\u2014\u2013]?\s*\d[\d,.]*\s*%?\s*$", compact):
-            return True
-        # Text >= 15 chars total \u2014 unlikely to be just chart rendering noise
-        if len(compact) >= 15:
+        # Text >= 20 chars total \u2014 long enough to be a real material sentence,
+        # not a table-row label (which rarely exceeds 18 chars).
+        if len(compact) >= 20:
             return True
         return False
 
@@ -539,11 +532,28 @@ class XingceCleaner:
                         if not rect:
                             continue
                         x0, y0, x1, y1 = (v * 25.4 / 72 for v in (rect.x0, rect.y0, rect.x1, rect.y1))
-                        if x1 - x0 < 20 and y1 - y0 < 20:
+                        # Collect ALL drawings including thin table-border lines.
+                        # Individual line segments (e.g. horizontal rules 145mm×0mm,
+                        # vertical rules 0mm×50mm) are too thin to pass a per-item
+                        # size check, but when merged together they form the bounding
+                        # box of the entire table.
+                        if x1 - x0 < 0.5 and y1 - y0 < 0.5:
                             continue
                         rects.append((x0, y0, x1, y1))
                     if rects:
-                        output[page_index] = XingceCleaner._merge_regions(rects)
+                        # Merge thin line segments into larger table regions first,
+                        # then filter out regions that are too small to be tables.
+                        merged = XingceCleaner._merge_regions(rects)
+                        filtered = []
+                        for x0, y0, x1, y1 in merged:
+                            if x1 - x0 >= 30 and y1 - y0 >= 20:
+                                # Expand upward by 15 mm to catch column-group
+                                # headers (e.g. "2022年" / "2023年") that sit
+                                # above the table border lines.
+                                expanded_y0 = max(HEADER_CUTOFF_MM, y0 - 15.0)
+                                filtered.append((x0, expanded_y0, x1, y1))
+                        if filtered:
+                            output[page_index] = filtered
             return output
         except Exception:
             return {}
