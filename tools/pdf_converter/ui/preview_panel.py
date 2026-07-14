@@ -3,8 +3,8 @@
 
 import fitz
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea,
-    QPushButton, QSplitter
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
+    QScrollArea, QPushButton, QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage
@@ -55,9 +55,9 @@ class PDFPreviewWidget(QWidget):
         self.scroll_area.setWidget(self.image_label)
         layout.addWidget(self.scroll_area, stretch=1)
 
-        # 翻页控制
+        # 翻页控制（含页数跳转）
         nav_layout = QHBoxLayout()
-        nav_layout.setSpacing(6)
+        nav_layout.setSpacing(4)
         nav_layout.setContentsMargins(0, 4, 0, 0)
 
         self.btn_prev = QPushButton("◀ 上一页")
@@ -67,22 +67,36 @@ class PDFPreviewWidget(QWidget):
         )
         self.btn_prev.clicked.connect(self._prev_page)
 
-        self.label_page = QLabel("— / —")
-        self.label_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_page.setStyleSheet("color: #6B7280; font-size: 12px;")
+        nav_layout.addWidget(self.btn_prev)
+        nav_layout.addStretch()
 
+        self.label_jump_prefix = QLabel("第")
+        self.label_jump_prefix.setStyleSheet("color: #6B7280; font-size: 12px; background: transparent;")
+        nav_layout.addWidget(self.label_jump_prefix)
+
+        self.input_jump_page = QLineEdit()
+        self.input_jump_page.setFixedWidth(44)
+        self.input_jump_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.input_jump_page.setStyleSheet(
+            "QLineEdit { border: 1px solid #D1D5DB; border-radius: 3px; "
+            "padding: 2px 4px; font-size: 12px; background: #FFFFFF; }"
+        )
+        self.input_jump_page.returnPressed.connect(self._jump_to_page)
+        nav_layout.addWidget(self.input_jump_page)
+
+        self.label_page = QLabel(" / — 页")
+        self.label_page.setStyleSheet("color: #6B7280; font-size: 12px;")
+        nav_layout.addWidget(self.label_page)
+
+        nav_layout.addStretch()
         self.btn_next = QPushButton("下一页 ▶")
         self.btn_next.setEnabled(False)
         self.btn_next.setStyleSheet(
             "QPushButton { padding: 4px 12px; font-size: 12px; }"
         )
         self.btn_next.clicked.connect(self._next_page)
-
-        nav_layout.addWidget(self.btn_prev)
-        nav_layout.addStretch()
-        nav_layout.addWidget(self.label_page)
-        nav_layout.addStretch()
         nav_layout.addWidget(self.btn_next)
+
         layout.addLayout(nav_layout)
 
     def resizeEvent(self, event):
@@ -128,8 +142,9 @@ class PDFPreviewWidget(QWidget):
         self._cached_pixmap = QPixmap.fromImage(img)
         self._fit_to_width()
         self.label_page.setText(
-            f"第 {self._current_page + 1} / {self._doc.page_count} 页"
+            f" / {self._doc.page_count} 页"
         )
+        self.input_jump_page.setText(str(self._current_page + 1))
 
     def _fit_to_width(self):
         """将缓存的原始图片缩放到适配当前面板宽度。"""
@@ -175,6 +190,20 @@ class PDFPreviewWidget(QWidget):
             self._update_nav()
             self.page_changed.emit(self._current_page)
 
+    def _jump_to_page(self):
+        """跳转到用户输入的页码。"""
+        if not self._doc:
+            return
+        try:
+            page_num = int(self.input_jump_page.text().strip())
+            if 1 <= page_num <= self._doc.page_count:
+                self._current_page = page_num - 1
+                self._render_current_page()
+                self._update_nav()
+                self.page_changed.emit(self._current_page)
+        except ValueError:
+            pass
+
     def clear(self):
         if self._doc:
             self._doc.close()
@@ -185,7 +214,8 @@ class PDFPreviewWidget(QWidget):
         self.image_label.setPixmap(QPixmap())
         self.btn_prev.setEnabled(False)
         self.btn_next.setEnabled(False)
-        self.label_page.setText("— / —")
+        self.input_jump_page.clear()
+        self.label_page.setText(" / — 页")
 
 
 class PreviewPanel(QWidget):

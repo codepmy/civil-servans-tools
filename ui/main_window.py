@@ -10,6 +10,7 @@ import urllib.request
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QGridLayout,
     QLabel,
@@ -24,7 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app_paths import resource_path
+from app_paths import resource_path, user_config_path
 from tools.pdf_converter.ui.preview_panel import PreviewPanel
 from tools.pdf_converter.ui.progress_dialog import ProgressDialog
 from tools.pdf_converter.ui.settings_panel import SettingsPanel
@@ -447,6 +448,8 @@ class MainWindow(QMainWindow):
             return
 
         if self._is_newer_version(remote_version, APP_VERSION):
+            if self._update_check_silent and self._load_skip_update_version() == remote_version:
+                return
             self._show_update_available(data, remote_version)
             self.status_bar.showMessage(f"发现新版本 {remote_version}")
         else:
@@ -476,6 +479,8 @@ class MainWindow(QMainWindow):
             f"发现新版本 {html.escape(remote_version)}<br><br>"
             "<span style='color:#B91C1C; font-size:15px; font-weight:700;'>请先卸载旧版本</span>"
         )
+        chk_skip = QCheckBox("不再提示此版本更新")
+        message.setCheckBox(chk_skip)
         message.setInformativeText(
             f"当前版本：{html.escape(APP_VERSION)}<br>"
             f"发布日期：{html.escape(release_date)}<br>"
@@ -490,6 +495,9 @@ class MainWindow(QMainWindow):
             open_button.setStyleSheet(PRIMARY_BUTTON_STYLE)
         message.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
         message.exec()
+
+        if chk_skip.isChecked():
+            self._save_skip_update_version(remote_version)
 
         if open_button and message.clickedButton() == open_button:
             self._open_download_url(download_url)
@@ -537,6 +545,35 @@ class MainWindow(QMainWindow):
     def _format_error(error: Exception) -> str:
         detail = traceback.format_exc(limit=6)
         return f"{error}\n\n详细信息:\n{detail}"
+
+    def _load_skip_update_version(self) -> str:
+        """Load the remote version that the user chose to skip."""
+        try:
+            path = user_config_path()
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return str(data.get("skip_update_version", "")).strip()
+        except Exception:
+            pass
+        return ""
+
+    def _save_skip_update_version(self, version: str):
+        """Save the remote version to skip for auto-update reminders."""
+        try:
+            path = user_config_path()
+            existing = {}
+            if path.exists():
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            existing["skip_update_version"] = version
+            path.write_text(
+                json.dumps(existing, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
     def _show_about(self):
         QMessageBox.about(
