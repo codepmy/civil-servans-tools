@@ -196,14 +196,18 @@ class LayoutEngine:
         elif getattr(question, "is_data_analysis", False):
             # Data analysis question without explicit section heading:
             # if it's the first question on its source page, place any
-            # unconsumed page-top images as implicit section material.
+            # unconsumed images above this question as implicit section
+            # material.  Use the questionʼs own Y position as the cut-off
+            # so that images belonging to a later sub-section (e.g. "二、…")
+            # on the same page are NOT consumed here.
             page_qs = self._page_questions.get(question.source_page, [])
             if page_qs and page_qs[0] is question:
+                q_y = getattr(question, "source_y_mm", 0) or 0
                 for img in self._take_images_in_source_range(
                     start_page=question.source_page,
                     start_y=0,
                     end_page=question.source_page,
-                    end_y=None,
+                    end_y=q_y,
                 ):
                     self._add_image(img)
 

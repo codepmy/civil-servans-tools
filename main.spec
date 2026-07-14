@@ -16,8 +16,7 @@ def collect_files(root, patterns):
 
 project_datas = [
     ('resources', 'resources'),
-    ('version.json', '.'),
-    ('toolsIco.ico', '.'),
+    ('version.json', '.')
 ]
 project_datas += collect_files(
     'tools/pdf_converter/config',
@@ -64,5 +63,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['toolsIco.ico'],
+    icon=['resources/toolsIco.ico'],
 )
