@@ -257,63 +257,127 @@ class LayoutEngine:
 
     def _layout_data_analysis_section(self, question: Question, heading_lines: list[str], line_height: float):
         images = self._take_images_for_section(question)
-        image_added = False
         pending_caption: list[str] = []
+        pending_caption_page: int | None = None
+        pending_caption_y: float | None = None
         pending_note: list[str] = []
         material_buffer: list[str] = []
+        material_last_page: int | None = None
+        material_last_y: float | None = None
         prompt_seen = False
         heading_xs = list(getattr(question, "section_line_xs", []) or [])
-        material_xs = [
-            heading_xs[idx] for idx, value in enumerate(heading_lines)
-            if idx < len(heading_xs) and self._is_material_paragraph_line(value.strip())
-        ]
+        heading_ys = list(getattr(question, "section_line_ys", []) or [])
+        heading_pages = list(getattr(question, "section_line_pages", []) or [])
+        fallback_page = getattr(question, "section_source_page", None) or question.source_page
+        last_text_page = fallback_page
+        events: list[dict] = []
+
+        for idx, raw_line in enumerate(heading_lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+            page_no = heading_pages[idx] if idx < len(heading_pages) and heading_pages[idx] else last_text_page
+            last_text_page = page_no
+            events.append({
+                "type": "text",
+                "page": page_no,
+                "y": heading_ys[idx] if idx < len(heading_ys) else 0.0,
+                "x": heading_xs[idx] if idx < len(heading_xs) else 0.0,
+                "text": line,
+            })
+
+        for img in images:
+            events.append({
+                "type": "image",
+                "page": img.page_number,
+                "y": img.bbox[1],
+                "x": img.bbox[0],
+                "image": img,
+            })
+
+        events.sort(key=lambda item: (item["page"], item["y"], 1 if item["type"] == "image" else 0, item["x"]))
+        material_xs = [item["x"] for item in events if item["type"] == "text" and self._is_material_paragraph_line(item["text"])]
         material_base_x = min(material_xs) if material_xs else 0.0
 
         def flush_material():
-            nonlocal material_buffer
+            nonlocal material_buffer, material_last_page, material_last_y
             if not material_buffer:
                 return
             text = self._join_material_lines(material_buffer)
             if text:
                 self._add_wrapped_material_line(
                     text,
-                    self._two_chinese_chars_mm(self.config.stem_font, self.config.stem_size),
+                    0.0,
                     self.config.stem_font,
                     self.config.stem_size,
                     line_height,
                 )
             material_buffer = []
+            material_last_page = None
+            material_last_y = None
 
-        def flush_caption_and_image():
-            nonlocal pending_caption, image_added
-            if pending_caption and images and not image_added:
-                self._ensure_space(self._estimate_caption_image_height(pending_caption, images, line_height))
+        def flush_pending_caption():
+            nonlocal pending_caption, pending_caption_page, pending_caption_y
             if pending_caption:
                 self._add_compact_section_lines(pending_caption, line_height)
                 pending_caption = []
-            if images and not image_added:
-                for img in images:
-                    self._add_image(img)
-                image_added = True
+            pending_caption_page = None
+            pending_caption_y = None
 
-        for idx, raw_line in enumerate(heading_lines):
-            line = raw_line.strip()
-            if not line:
-                continue
+        def flush_pending_note():
+            nonlocal pending_note
+            if pending_note:
+                self._add_compact_section_lines(pending_note, line_height)
+                pending_note = []
+
+        def should_start_new_material_paragraph(page_no: int, y_mm: float, x_mm: float) -> bool:
+            if not material_buffer:
+                return False
+            if self._is_new_material_paragraph_x(x_mm, material_base_x):
+                return True
+            return material_last_page == page_no and material_last_y is not None and y_mm - material_last_y > line_height * 1.7
+
+        def next_image_after(page_no: int, y_mm: float) -> dict | None:
+            for candidate in events:
+                if candidate["type"] == "image" and candidate["page"] == page_no and candidate["y"] >= y_mm - 0.5:
+                    return candidate
+            return None
+
+        def is_caption_continuation(event: dict) -> bool:
+            if not pending_caption or pending_caption_page != event["page"] or pending_caption_y is None:
+                return False
+            if event["y"] - pending_caption_y > line_height * 1.5:
+                return False
+            image_event = next_image_after(event["page"], pending_caption_y)
+            return bool(image_event and event["y"] <= image_event["y"] + 0.5)
+
+        for event in events:
             if prompt_seen:
                 continue
+            if event["type"] == "image":
+                flush_material()
+                flush_pending_caption()
+                self._add_image(event["image"])
+                continue
+
+            line = event["text"]
             if self._is_table_caption_line(line):
                 flush_material()
-                if pending_caption:
-                    flush_caption_and_image()
+                flush_pending_note()
+                flush_pending_caption()
                 pending_caption = [line]
+                pending_caption_page = event["page"]
+                pending_caption_y = event["y"]
                 continue
-            if pending_caption and not image_added and not self._is_note_line(line) and not self._is_data_question_prompt(line):
+            if is_caption_continuation(event) and not self._is_note_line(line) and not self._is_data_question_prompt(line):
                 pending_caption.append(line)
+                pending_caption_y = event["y"]
                 continue
+            if pending_caption:
+                flush_pending_caption()
             if self._is_note_line(line):
                 flush_material()
-                flush_caption_and_image()
+                flush_pending_caption()
                 pending_note.append(line)
                 continue
             if pending_note and not self._is_data_question_prompt(line):
@@ -322,28 +386,25 @@ class LayoutEngine:
             if self._is_data_question_prompt(line):
                 prompt_seen = True
                 flush_material()
-                flush_caption_and_image()
-                if pending_note:
-                    self._add_compact_section_lines(pending_note, line_height)
-                    pending_note = []
+                flush_pending_caption()
+                flush_pending_note()
                 self._add_compact_section_lines([line], line_height)
                 continue
             if pending_note:
-                self._add_compact_section_lines(pending_note, line_height)
-                pending_note = []
+                flush_pending_note()
             if self._is_material_paragraph_line(line):
-                line_x = heading_xs[idx] if idx < len(heading_xs) else material_base_x
-                if material_buffer and self._is_new_material_paragraph_x(line_x, material_base_x):
+                if should_start_new_material_paragraph(event["page"], event["y"], event["x"]):
                     flush_material()
                 material_buffer.append(line)
+                material_last_page = event["page"]
+                material_last_y = event["y"]
             else:
                 flush_material()
                 self._add_compact_section_lines([line], line_height)
 
         flush_material()
-        flush_caption_and_image()
-        if pending_note:
-            self._add_compact_section_lines(pending_note, line_height)
+        flush_pending_caption()
+        flush_pending_note()
         self._ensure_space(1)
         self._current_y += 1
 
@@ -669,7 +730,7 @@ class LayoutEngine:
             return False
         if re.match(r"^[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+[\u3001\.\uff0e]", compact):
             return False
-        return bool(re.search(r"[\u4e00-\u9fff]", compact) and re.search(r"\d|\u5e74|\u4e07|\u4ebf|\u589e|\u964d|\u6bd4", compact))
+        return bool(len(compact) >= 10 and re.search(r"[\u4e00-\u9fff]", compact))
 
     @staticmethod
     def _join_material_lines(lines: list[str]) -> str:
