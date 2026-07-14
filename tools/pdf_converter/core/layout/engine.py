@@ -193,6 +193,19 @@ class LayoutEngine:
         line_height = self._line_height(self.config.stem_size)
         if getattr(question, "section_heading", ""):
             self._layout_section_heading(question, line_height)
+        elif getattr(question, "is_data_analysis", False):
+            # Data analysis question without explicit section heading:
+            # if it's the first question on its source page, place any
+            # unconsumed page-top images as implicit section material.
+            page_qs = self._page_questions.get(question.source_page, [])
+            if page_qs and page_qs[0] is question:
+                for img in self._take_images_in_source_range(
+                    start_page=question.source_page,
+                    start_y=0,
+                    end_page=question.source_page,
+                    end_y=None,
+                ):
+                    self._add_image(img)
 
         q_label = f"{question.number}{self.config.question_suffix}"
         stem_segments = self._stem_segments(question.stem)
@@ -214,7 +227,98 @@ class LayoutEngine:
                 if line:
                     self._add_text_line("question_stem", line, self.config.margin_left, self.config.stem_font, self.config.stem_size, line_height)
 
-        self._place_images_for_question(question, self._page_questions.get(question.source_page, []))
+        # Per-question image placement: only for non-data-analysis sections.
+        # Data analysis images are section-level (shared material charts/tables)
+        # and are already placed by _layout_data_analysis_section.
+        # Exceptions:
+        #   1. The last question may have inline option images on trailing pages.
+        #   2. DA questions with chart-based options (all options "如图所示" etc.)
+        #      need per-question images placed between stem and option labels.
+        is_da = getattr(question, "is_data_analysis", False)
+        is_last = getattr(question, "source_end_page", None) is None
+        _CHART_PLACEHOLDERS = frozenset({"如图所示", "如下图", "见上图", ""})
+        has_chart_opts = (
+            is_da
+            and len(question.options) >= 4
+            and all((opt.text or "").strip() in _CHART_PLACEHOLDERS for opt in question.options)
+        )
+        # Detect image-option questions (e.g. 图形推理): all options have no
+        # meaningful text body — they are pure images labeled A/B/C/D.
+        _option_bodies: list[str] = []
+        for opt in question.options:
+            body = self._normalize_option_text(opt.text).strip()
+            if body and body != opt.label:
+                _option_bodies.append(body)
+        has_image_opts = (
+            not is_da
+            and not has_chart_opts
+            and len(question.options) >= 4
+            and len(_option_bodies) == 0
+        )
+        # For image-option questions, capture images now but defer placement
+        # until after labels are rendered, so labels appear before images.
+        _option_images: list[ImageBlock] = []
+        if has_image_opts:
+            _option_images = self._take_images_in_source_range(
+                start_page=question.source_page,
+                start_y=getattr(question, "source_y_mm", 0) or 0,
+                end_page=getattr(question, "source_end_page", None) or question.source_page,
+                end_y=getattr(question, "source_end_y_mm", None),
+            )
+            # Filter out non-content images (tiny, backgrounds, separators)
+            # so the stem/option image count is accurate for interleaving.
+            page_w = self.config.page_width_mm
+            page_h = self.config.page_height_mm
+            _option_images = [
+                img for img in _option_images
+                if not (img.width_mm < 20 and img.height_mm < 20)
+                and not (img.width_mm > page_w * 0.95 and img.height_mm > page_h * 0.95)
+                and not (img.height_mm < 15 and img.width_mm > img.height_mm * 5)
+            ]
+        elif not is_da or has_chart_opts:
+            if has_chart_opts:
+                # Chart-option questions (all options are "如图所示" etc.) need
+                # ALL images on the end page — don't clip at end_y, because the
+                # end_y belongs to the next question's section on a later page
+                # and would incorrectly exclude chart images from the current page.
+                # Render chart option images at 60% scale to keep them compact
+                # and prevent them from displacing the next section's material.
+                _CHART_OPTION_IMG_SCALE = 0.6
+                end_page = getattr(question, "source_end_page", None) or question.source_page
+                end_y = getattr(question, "source_end_y_mm", None)
+                for img in self._take_images_in_source_range(
+                    start_page=question.source_page,
+                    start_y=getattr(question, "source_y_mm", 0) or 0,
+                    end_page=end_page,
+                    end_y=end_y,
+                ):
+                    self._add_image(img, max_scale=_CHART_OPTION_IMG_SCALE)
+            else:
+                self._place_images_for_question(question, self._page_questions.get(question.source_page, []))
+        elif is_last:
+            # Last DA question: extend range to capture trailing option images,
+            # but exclude the final watermark page (QR code / ad pages at the
+            # very end of the PDF that have no exam questions).
+            end_page = question.source_page
+            if self._images_by_page:
+                last_q_page = max(self._page_questions.keys()) if self._page_questions else question.source_page
+                # Only allow one overflow page if the last question has chart
+                # options that might spill over (e.g. bar chart choices).
+                _has_chart_opts = any(
+                    (o.text or "").strip() in ("如图所示", "如下图", "")
+                    for o in question.options
+                ) if question.options else False
+                overflow = 1 if _has_chart_opts else 0
+                max_page = min(max(self._images_by_page.keys()), last_q_page + overflow)
+                if max_page > end_page:
+                    end_page = max_page
+            for img in self._take_images_in_source_range(
+                start_page=question.source_page,
+                start_y=getattr(question, "source_y_mm", 0) or 0,
+                end_page=end_page,
+                end_y=None,
+            ):
+                self._add_image(img)
 
         self._ensure_space(1)
         self._current_y += 1
@@ -222,15 +326,41 @@ class LayoutEngine:
         opt_indent = self.config.margin_left + self.config.option_indent_mm
         opt_width = max(10, self.content_width - self.config.option_indent_mm)
         opt_line_h = self._line_height(self.config.option_size)
-        for opt in question.options:
-            label = f"{opt.label}{self.config.option_suffix}"
-            opt_text = label + self._normalize_option_text(opt.text)
-            opt_lines = self._break_lines(opt_text, opt_width, self.config.option_font, self.config.option_size)
-            current_indent = opt_indent
-            for idx, line in enumerate(opt_lines):
-                self._add_text_line("option_text", line, current_indent, self.config.option_font, self.config.option_size, opt_line_h)
-                if idx == 0:
-                    current_indent = opt_indent + self._text_width_mm(label, self.config.option_font, self.config.option_size)
+        if has_image_opts:
+            # Image-based options: if there are enough individual images
+            # (one per option), interleave labels with images so each
+            # option is identifiable. Otherwise (composite image covering
+            # all options) just place the images — labels are embedded.
+            if len(_option_images) >= len(question.options):
+                stem_count = len(_option_images) - len(question.options)
+                for img in _option_images[:stem_count]:
+                    self._add_image(img)
+                for i, opt in enumerate(question.options):
+                    body = self._normalize_option_text(opt.text).strip()
+                    display = body if body else opt.label
+                    for line in self._break_lines(display, opt_width, self.config.option_font, self.config.option_size):
+                        self._add_text_line("option_text", line, opt_indent, self.config.option_font, self.config.option_size, opt_line_h)
+                    img_idx = stem_count + i
+                    if img_idx < len(_option_images):
+                        self._add_image(_option_images[img_idx])
+            else:
+                for img in _option_images:
+                    self._add_image(img)
+        else:
+            for opt in question.options:
+                label = f"{opt.label}{self.config.option_suffix} "
+                opt_body = self._normalize_option_text(opt.text)
+                # When the option text is just the option letter (e.g. "A" for label A),
+                # it's chart label noise — skip it to avoid rendering "A.A"
+                if opt_body.strip() == opt.label:
+                    opt_body = ""
+                opt_text = label + opt_body
+                opt_lines = self._break_lines(opt_text, opt_width, self.config.option_font, self.config.option_size)
+                current_indent = opt_indent
+                for idx, line in enumerate(opt_lines):
+                    self._add_text_line("option_text", line, current_indent, self.config.option_font, self.config.option_size, opt_line_h)
+                    if idx == 0:
+                        current_indent = opt_indent + self._text_width_mm(label, self.config.option_font, self.config.option_size)
 
         if self.config.show_answer_line:
             self._ensure_space(opt_line_h + 2)
@@ -262,9 +392,16 @@ class LayoutEngine:
         pending_caption_y: float | None = None
         pending_note: list[str] = []
         material_buffer: list[str] = []
+        material_first_x: float | None = None  # X position of first line in paragraph (for indent)
+        table_buffer: list[str] = []  # table data lines, rendered with preserved spacing
+        instr_buffer: list[str] = []  # non-material instruction lines, joined for re-flow
         material_last_page: int | None = None
         material_last_y: float | None = None
+        instr_last_page: int | None = None
+        instr_last_y: float | None = None
         prompt_seen = False
+        in_table_area = False  # true while skipping table cell lines
+        pending_table_caption = False  # next line after "表" is the caption
         heading_xs = list(getattr(question, "section_line_xs", []) or [])
         heading_ys = list(getattr(question, "section_line_ys", []) or [])
         heading_pages = list(getattr(question, "section_line_pages", []) or [])
@@ -284,6 +421,7 @@ class LayoutEngine:
                 "y": heading_ys[idx] if idx < len(heading_ys) else 0.0,
                 "x": heading_xs[idx] if idx < len(heading_xs) else 0.0,
                 "text": line,
+                "raw": raw_line,  # unstripped original for table rendering
             })
 
         for img in images:
@@ -300,21 +438,43 @@ class LayoutEngine:
         material_base_x = min(material_xs) if material_xs else 0.0
 
         def flush_material():
-            nonlocal material_buffer, material_last_page, material_last_y
+            nonlocal material_buffer, material_first_x, material_last_page, material_last_y
             if not material_buffer:
                 return
             text = self._join_material_lines(material_buffer)
             if text:
+                # Preserve original indentation from the first line's X position
+                indent = (material_first_x or 0.0) - material_base_x
+                indent = max(0.0, indent) if material_first_x else 0.0
                 self._add_wrapped_material_line(
                     text,
-                    0.0,
+                    indent,
                     self.config.stem_font,
                     self.config.stem_size,
                     line_height,
                 )
+                # Add paragraph spacing after material paragraph
+                self._ensure_space(1.5)
+                self._current_y += 1.5
             material_buffer = []
+            material_first_x = None
             material_last_page = None
             material_last_y = None
+
+        def flush_instr():
+            """Flush accumulated instruction lines as continuous flowing text."""
+            nonlocal instr_buffer, instr_last_page, instr_last_y
+            if not instr_buffer:
+                return
+            text = self._join_material_lines(instr_buffer)
+            if text:
+                self._add_wrapped_material_line(
+                    text, 0.0,
+                    self.config.stem_font, self.config.stem_size, line_height,
+                )
+            instr_buffer = []
+            instr_last_page = None
+            instr_last_y = None
 
         def flush_pending_caption():
             nonlocal pending_caption, pending_caption_page, pending_caption_y
@@ -330,6 +490,26 @@ class LayoutEngine:
                 self._add_compact_section_lines(pending_note, line_height)
                 pending_note = []
 
+        def flush_table():
+            """Flush table data lines with original spacing preserved."""
+            nonlocal table_buffer
+            if not table_buffer:
+                return
+            for raw_line in table_buffer:
+                text = LayoutEngine._sanitize_text(raw_line).strip()
+                if not text:
+                    continue
+                # Render table lines as-is; don't break mid-line
+                self._ensure_space(line_height)
+                self._current_page.elements.append(PageElement(
+                    type="material", text=text,
+                    x_mm=self.config.margin_left, y_mm=self._current_y,
+                    font_name=self.config.stem_font, font_size=self.config.stem_size,
+                    line_height_mm=line_height,
+                ))
+                self._current_y += line_height
+            table_buffer = []
+
         def should_start_new_material_paragraph(page_no: int, y_mm: float, x_mm: float) -> bool:
             if not material_buffer:
                 return False
@@ -344,25 +524,77 @@ class LayoutEngine:
             return None
 
         def is_caption_continuation(event: dict) -> bool:
-            if not pending_caption or pending_caption_page != event["page"] or pending_caption_y is None:
+            if not pending_caption or pending_caption_y is None:
                 return False
-            if event["y"] - pending_caption_y > line_height * 1.5:
-                return False
-            image_event = next_image_after(event["page"], pending_caption_y)
-            return bool(image_event and event["y"] <= image_event["y"] + 0.5)
+            # Same page: check Y gap and image presence
+            if pending_caption_page == event["page"]:
+                if event["y"] - pending_caption_y > line_height * 1.5:
+                    return False
+                image_event = next_image_after(event["page"], pending_caption_y)
+                return bool(image_event and event["y"] <= image_event["y"] + 0.5)
+            # Cross-page continuation: accept if the next consecutive page and near top of new page
+            if event["page"] == pending_caption_page + 1:
+                return event["y"] < self.config.margin_top + line_height * 3
+            return False
 
         for event in events:
             if prompt_seen:
                 continue
             if event["type"] == "image":
                 flush_material()
+                flush_table()
+                flush_instr()
                 flush_pending_caption()
                 self._add_image(event["image"])
                 continue
 
             line = event["text"]
+
+            # ── Table-area detection ──────────────────────────────
+            # After a lone "表"/"图" marker, subsequent short lines
+            # are individual table cells — skip them.  The marker
+            # itself and the table caption are rendered normally.
+            if in_table_area:
+                if pending_table_caption:
+                    # This line is the table caption — render it normally
+                    # without exiting table-area mode.
+                    pending_table_caption = False
+                    # fall through to normal processing below
+                elif re.match(r"^[一二三四五六七八九十]、", line) or self._is_data_question_prompt(line):
+                    in_table_area = False
+                else:
+                    # Table cell: preserve original spacing for alignment
+                    table_buffer.append(event.get("raw", line))
+                    continue
+            if line.strip() in (TABLE_CHAR, FIGURE_CHAR):
+                # Render "表"/"图" as a normal line, then enter cell-skip mode
+                flush_material()
+                flush_table()
+                flush_instr()
+                self._add_text_line("material", line, self.config.margin_left,
+                                    self.config.stem_font, self.config.stem_size, line_height)
+                in_table_area = True
+                pending_table_caption = True
+                continue
+            # ── Section header detection ──────────────────────────
+            # Lines like "二、根据以下材料，回答106～110 题。" force a
+            # break before the material that follows.
+            if re.match(r"^[一二三四五六七八九十]、", line):
+                flush_material()
+                flush_table()
+                flush_instr()
+                flush_pending_caption()
+                flush_pending_note()
+                self._add_compact_section_lines([line], line_height)
+                self._ensure_space(1)
+                self._current_y += 1
+                continue
+            # ──────────────────────────────────────────────────────
+
             if self._is_table_caption_line(line):
                 flush_material()
+                flush_table()
+                flush_instr()
                 flush_pending_note()
                 flush_pending_caption()
                 pending_caption = [line]
@@ -374,18 +606,36 @@ class LayoutEngine:
                 pending_caption_y = event["y"]
                 continue
             if pending_caption:
+                flush_table()
                 flush_pending_caption()
             if self._is_note_line(line):
                 flush_material()
+                flush_table()
+                flush_instr()
                 flush_pending_caption()
                 pending_note.append(line)
                 continue
-            if pending_note and not self._is_data_question_prompt(line):
-                pending_note.append(line)
-                continue
+            if pending_note:
+                if self._is_data_question_prompt(line):
+                    prompt_seen = True
+                    flush_material()
+                    flush_instr()
+                    flush_pending_caption()
+                    flush_pending_note()
+                    self._add_compact_section_lines([line], line_height)
+                    continue
+                if self._is_material_paragraph_line(line) or self._is_table_caption_line(line):
+                    flush_table()
+                    flush_pending_note()
+                    # fall through to handle this line normally below
+                else:
+                    pending_note.append(line)
+                    continue
             if self._is_data_question_prompt(line):
                 prompt_seen = True
                 flush_material()
+                flush_table()
+                flush_instr()
                 flush_pending_caption()
                 flush_pending_note()
                 self._add_compact_section_lines([line], line_height)
@@ -393,16 +643,51 @@ class LayoutEngine:
             if pending_note:
                 flush_pending_note()
             if self._is_material_paragraph_line(line):
-                if should_start_new_material_paragraph(event["page"], event["y"], event["x"]):
+                if self._is_table_data_line(line):
+                    # Table data: render with preserved spacing, not as flowing text
                     flush_material()
-                material_buffer.append(line)
-                material_last_page = event["page"]
-                material_last_y = event["y"]
+                    flush_instr()
+                    table_buffer.append(event.get("raw", line))
+                elif should_start_new_material_paragraph(event["page"], event["y"], event["x"]):
+                    flush_material()
+                    flush_instr()
+                    material_buffer.append(line)
+                    material_first_x = event["x"] if material_first_x is None else material_first_x
+                    material_last_page = event["page"]
+                    material_last_y = event["y"]
+                elif instr_buffer:
+                    is_new_from_instr = (
+                        (instr_last_page is not None and instr_last_page != event["page"])
+                        or (instr_last_y is not None and event["y"] - instr_last_y > line_height * 1.8)
+                    )
+                    if is_new_from_instr:
+                        flush_instr()
+                        self._ensure_space(3)
+                        self._current_y += 3
+                        material_buffer.append(line)
+                        material_first_x = event["x"]
+                        material_last_page = event["page"]
+                        material_last_y = event["y"]
+                    else:
+                        instr_buffer.append(line)
+                        instr_last_page = event["page"]
+                        instr_last_y = event["y"]
+                else:
+                    if not material_buffer:
+                        material_first_x = event["x"]
+                    material_buffer.append(line)
+                    material_last_page = event["page"]
+                    material_last_y = event["y"]
             else:
                 flush_material()
-                self._add_compact_section_lines([line], line_height)
+                flush_table()
+                instr_buffer.append(line)
+                instr_last_page = event["page"]
+                instr_last_y = event["y"]
 
         flush_material()
+        flush_table()
+        flush_instr()
         flush_pending_caption()
         flush_pending_note()
         self._ensure_space(1)
@@ -548,7 +833,9 @@ class LayoutEngine:
         for img in images:
             grouped.setdefault(img.page_number, []).append(img)
         for page_images in grouped.values():
-            page_images.sort(key=lambda i: (i.bbox[1], i.bbox[0]))
+            # Sort top-to-bottom (descending Y, since PDF y=0 is at page bottom),
+            # then left-to-right (ascending X). This matches natural reading order.
+            page_images.sort(key=lambda i: (-i.bbox[1], i.bbox[0]))
         return grouped
 
     def _place_images_for_question(self, question: Question, page_questions: list[Question]):
@@ -602,11 +889,25 @@ class LayoutEngine:
             self._images_by_page[page_no] = [img for img in page_images if img not in assigned]
         return result
 
-    def _add_image(self, img: ImageBlock):
+    def _add_image(self, img: ImageBlock, max_scale: float = 1.0):
+        # Skip tiny decorative images (watermark icons, page ornaments, etc.)
+        if img.width_mm < 20 and img.height_mm < 20:
+            return
+        # Skip full-page background images (the rendered page image from the
+        # original PDF, typically 210×297mm at position (0,0)). These are not
+        # content images and would inflate the output page count.
+        page_w = self.config.page_width_mm
+        page_h = self.config.page_height_mm
+        if img.width_mm > page_w * 0.95 and img.height_mm > page_h * 0.95:
+            return
+        # Skip thin separator / decoration lines (very wide but very short,
+        # e.g. 155×8mm horizontal rule). These are page ornaments, not content.
+        if img.height_mm < 15 and img.width_mm > img.height_mm * 5:
+            return
         scale = min(
             self.content_width / max(img.width_mm, 1),
             (self.content_bottom - self.content_top) / max(img.height_mm, 1),
-            1.0,
+            max_scale,
         )
         w = max(10, img.width_mm * scale)
         h = max(8, img.height_mm * scale)
@@ -639,11 +940,10 @@ class LayoutEngine:
         text = LayoutEngine._sanitize_text(text)
         if LayoutEngine._looks_like_formula(text):
             return re.sub(r"[ \t]+", " ", text.replace("\r", "").replace("\n", "").strip())
-        placeholder = "\uE000"
+        # Preserve meaningful single spaces between words/idioms (critical for
+        # \u903B\u8F91\u586B\u7A7A where options are e.g. "\u63A8\u9648\u51FA\u65B0 \u4E0E\u65F6\u4FF1\u8FDB" \u2013 idiom pairs).
         text = text.replace("\r", "").replace("\n", "")
-        text = re.sub(r"[ \t]{2,}", placeholder, text.strip())
-        text = "".join(text.split())
-        return text.replace(placeholder, "  ")
+        return " ".join(text.split())
 
     @staticmethod
     def _sanitize_text(text: str) -> str:
@@ -718,6 +1018,16 @@ class LayoutEngine:
         return compact.startswith(QUESTION_PROMPT_PREFIX)
 
     @staticmethod
+    def _is_table_data_line(line: str) -> bool:
+        """Check if a line looks like table data (multiple spaced columns)."""
+        stripped = line.strip()
+        if "   " not in stripped:
+            return False
+        parts = stripped.split()
+        # Table lines have 4+ columns with significant gaps
+        return len(parts) >= 4
+
+    @staticmethod
     def _is_material_paragraph_line(line: str) -> bool:
         compact = "".join((line or "").split())
         if not compact:
@@ -730,7 +1040,7 @@ class LayoutEngine:
             return False
         if re.match(r"^[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+[\u3001\.\uff0e]", compact):
             return False
-        return bool(len(compact) >= 10 and re.search(r"[\u4e00-\u9fff]", compact))
+        return bool(len(compact) >= 5 and re.search(r"[\u4e00-\u9fff]", compact))
 
     @staticmethod
     def _join_material_lines(lines: list[str]) -> str:

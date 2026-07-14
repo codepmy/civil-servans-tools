@@ -25,6 +25,7 @@ MATERIAL = _u(0x6750, 0x6599)
 YEAR = _u(0x5E74)
 TABLE = _u(0x8868)
 FIGURE = _u(0x56FE)
+NOTE_CHAR = _u(0x6CE8)
 
 
 class XingceCleaner:
@@ -70,7 +71,7 @@ class XingceCleaner:
         in_data_analysis = False
         for i, page in enumerate(doc.pages):
             if progress:
-                progress(int((i + 1) / len(doc.pages) * 100), "cleaning")
+                progress(int((i + 1) / len(doc.pages) * 100), "清洗中")
 
             if pdf_doc and i < pdf_doc.page_count:
                 page_lines = self._extract_positioned_lines(pdf_doc[i])
@@ -170,7 +171,7 @@ class XingceCleaner:
         return bool(
             re.match(r"^\s*\u7b2c\s*\d+\s*\u9875\s*$", text)
             or re.match(r"^\s*\u5171\s*\d+\s*\u9875\s*$", text)
-            or (re.match(r"^[-\u2014\u2013]?\s*\d+\s*[-\u2014\u2013]?\s*$", text) and len(text) < 10)
+            or (re.match(r"^[-\u2014\u2013]?\s*\d{1,3}\s*[-\u2014\u2013]?\s*$", text) and len(text) < 8)
         )
 
     def _is_section_instruction(self, text: str) -> bool:
@@ -193,9 +194,47 @@ class XingceCleaner:
         question_like = re.match(r"^\s*(\d{1,3})\s*[\.\uff0e\u3001\u3002](?!\d)", text)
         if question_like or XingceCleaner.OPTION_RE.match(text):
             return False
+        if XingceCleaner._looks_like_meaningful_content(text):
+            return False
         for x0, y0, x1, y1 in regions:
             if y0 - 1.5 <= y_mm <= y1 + 1.5 and x0 - 2.0 <= x_mm <= x1 + 2.0:
                 return True
+        return False
+
+    @staticmethod
+    def _looks_like_meaningful_content(text: str) -> bool:
+        """Check if text inside a visual region is meaningful data-analysis content that should be preserved."""
+        compact = re.sub(r"\s+", "", text.strip())
+        if not compact:
+            return False
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", compact))
+        # Table headers or short material text (e.g. "\u4f01\u4e1a\u603b\u6570", "\u884c\u4e1a\u540d\u79f0")
+        if cjk_count >= 3:
+            return True
+        # Short pure-CJK table labels (e.g. "\u4e1c\u76df", "\u65e5\u672c", "\u884c\u4e1a", "\u603b\u8ba1")
+        if cjk_count >= 2 and len(compact) == cjk_count:
+            return True
+        # Table/figure captions
+        if compact.startswith((TABLE, FIGURE)):
+            return True
+        # Note text
+        if compact.startswith(NOTE_CHAR):
+            return True
+        # Year patterns like "2024\u5e74"
+        if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR), compact):
+            return True
+        # Table data: CJK mixed with digits (e.g. "\u571f\u6728\u5de5\u7a0b\u5efa\u7b51")
+        if cjk_count >= 2 and re.search(r"\d", compact):
+            return True
+        # Table units / parenthesized items (e.g. "\uff08\u5bb6\uff09", "\uff08\u4ebf\u5143\uff09")
+        if re.match(r"^[\uff08\(][^\)\uff09]+[\uff09\)]$", compact):
+            return True
+        # Numeric table data cells (e.g. "123.45", "-5.6%")
+        if re.match(r"^[-\u2014\u2013]?\s*\d[\d,.]*\s*%?\s*$", compact):
+            return True
+        # Text >= 15 chars total \u2014 unlikely to be just chart rendering noise
+        if len(compact) >= 15:
+            return True
         return False
 
     @classmethod
@@ -335,6 +374,12 @@ class XingceCleaner:
                 continue
 
             if current_q:
+                # After all 4 options are collected, lines from pages 2+ beyond
+                # the question's source page are likely watermark/ad content,
+                # not exam material. Skip them to prevent pollution.
+                if len(current_q.options) >= 4 and current_page - current_q.source_page >= 2:
+                    last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
+                    continue
                 if current_option:
                     current_option.text = self._append_option_continuation(
                         current_option.text, line, current_page, y_mm, x_mm, last_page, last_y_mm, last_x_mm
@@ -408,7 +453,9 @@ class XingceCleaner:
         if last_page == current_page and last_y_mm is not None and y_mm - last_y_mm < 9.0:
             return False
         if last_page != current_page:
-            return XingceCleaner._looks_like_material_content(line)
+            if XingceCleaner._looks_like_material_start(line):
+                return True
+            return x_mm <= 35.0 and XingceCleaner._looks_like_material_content(line)
         return x_mm <= 35.0 and XingceCleaner._looks_like_material_content(line)
 
     @staticmethod
