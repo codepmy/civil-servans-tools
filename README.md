@@ -150,6 +150,11 @@ CivilServantsTools/
 
 ---
 
+## 🔗 友情链接 / Community
+
+- **[linux.do](https://linux.do)** — 新的理想型社区 / a thriving developer community.
+
+---
 ## 作者支持
 
 如果小工具有帮到您，也欢迎请作者一杯咖啡。
