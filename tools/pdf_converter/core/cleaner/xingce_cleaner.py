@@ -149,9 +149,21 @@ class XingceCleaner:
 
     @staticmethod
     def _is_content_line_near_header(text: str, y_mm: float) -> bool:
-        if y_mm < 18.0:
+        # Question numbers, option labels, and section markers at any
+        # Y position are exam content — never header/watermark noise.
+        if (XingceCleaner.QUESTION_NUM_RE.match(text)
+                or XingceCleaner.OPTION_RE.match(text)
+                or XingceCleaner.SECTION_RE.match(text)):
+            return True
+        # Long CJK text (>=15 chars) near the page top is exam content,
+        # not a header/watermark — real headers are short ("版权所有",
+        # "第X页", etc.).
+        compact = re.sub(r"\s+", "", text)
+        if len(compact) >= 15:
+            return True
+        if y_mm < 12.0:
             return False
-        return bool(XingceCleaner.QUESTION_NUM_RE.match(text) or XingceCleaner.SECTION_RE.match(text))
+        return False
 
     @staticmethod
     def _is_content_line_near_footer(text: str, y_mm: float, page_height_mm: float) -> bool:
@@ -292,6 +304,21 @@ class XingceCleaner:
 
         for item in lines:
             if item[0] == SECTION_MARKER:
+                # When a section marker immediately follows a question
+                # number that has no content yet (e.g. "1.   "), do NOT
+                # finalize the empty question — that would create a
+                # phantom Q1 and shift all later numbers by +1.
+                # Instead, attach the section as the question's heading
+                # and keep accumulating subsequent lines as its stem.
+                if current_q and not stem_lines and not current_q.options:
+                    pending_sections.append(item[1])
+                    pending_section_xs.append(item[4] if len(item) > 4 else 0.0)
+                    pending_section_ys.append(item[3] if len(item) > 3 else 0.0)
+                    pending_section_pages.append(item[2] if len(item) > 2 else 0)
+                    if pending_source_page is None:
+                        pending_source_page = item[2] if len(item) > 2 else pending_source_page
+                        pending_source_y_mm = item[3] if len(item) > 3 else pending_source_y_mm
+                    continue
                 finish_current_question()
                 pending_sections.append(item[1])
                 pending_section_xs.append(item[4] if len(item) > 4 else 0.0)

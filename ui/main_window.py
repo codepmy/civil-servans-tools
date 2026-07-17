@@ -6,6 +6,7 @@ import os
 import traceback
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QAction, QDesktopServices, QPixmap
@@ -31,6 +32,7 @@ from tools.pdf_converter.ui.preview_panel import PreviewPanel
 from tools.pdf_converter.ui.progress_dialog import ProgressDialog
 from tools.pdf_converter.ui.settings_panel import SettingsPanel
 from tools.pdf_converter.ui.toolbar import MainToolbar
+from tools.pdf_converter.ui.batch_dialog import BatchDialog
 from tools.pdf_converter.ui.worker import ConversionWorker
 from tools.answer_sheet.core.generator import AnswerSheetGenerator
 from tools.answer_sheet.ui.widget import AnswerSheetWidget
@@ -275,12 +277,18 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         self.toolbar.home_clicked.connect(self._show_home)
         self.toolbar.open_clicked.connect(self._on_open)
+        self.toolbar.batch_clicked.connect(self._on_batch)
         self.toolbar.save_clicked.connect(self._on_save)
         self.toolbar.convert_clicked.connect(self._on_convert)
         self.settings_panel.convert_now.connect(self._on_convert)
+        self.preview_panel.file_dropped.connect(self._on_open)
         self.timer_tool_page.back_requested.connect(self._show_home)
         self.answer_sheet_page.back_requested.connect(self._show_home)
         self.answer_sheet_page.status_message.connect(self._show_answer_sheet_status)
+
+    def _on_batch(self):
+        dialog = BatchDialog(self._fonts, self)
+        dialog.exec()
 
     def _show_answer_sheet_status(self, message: str):
         if self.stack.currentWidget() == self.answer_sheet_page:
@@ -406,7 +414,12 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先执行转换。")
             return
 
-        path, _ = QFileDialog.getSaveFileName(self, "保存PDF", "converted.pdf", "PDF文件 (*.pdf)")
+        default_name = "converted.pdf"
+        if self._input_path:
+            stem = Path(self._input_path).stem
+            default_name = f"{stem}_转换后.pdf"
+
+        path, _ = QFileDialog.getSaveFileName(self, "保存PDF", default_name, "PDF文件 (*.pdf)")
         if not path:
             return
 

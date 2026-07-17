@@ -522,11 +522,16 @@ class AnswerSheetWidget(QWidget):
         except Exception as exc:
             self.status_message.emit(f"申论答题纸预览生成失败：{exc}")
 
+    def _default_export_name(self) -> str:
+        mode = "标准模式" if self.radio_standard.isChecked() else "分题模式"
+        return f"申论答题纸_{mode}"
+
     def export_pdf(self):
         self._ensure_pdf_bytes()
         if not self._pdf_bytes:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "导出申论答题纸 PDF", "shenlun_answer_sheet.pdf", "PDF文件 (*.pdf)")
+        default_name = f"{self._default_export_name()}.pdf"
+        path, _ = QFileDialog.getSaveFileName(self, "导出申论答题纸 PDF", default_name, "PDF文件 (*.pdf)")
         if not path:
             return
         if not path.lower().endswith(".pdf"):
@@ -547,7 +552,8 @@ class AnswerSheetWidget(QWidget):
         if not directory:
             return
         try:
-            paths = self._generator.export_pngs(self._pdf_bytes, Path(directory))
+            base_name = self._default_export_name()
+            paths = self._generator.export_pngs(self._pdf_bytes, Path(directory), base_name=base_name)
             self.status_message.emit(f"已导出 {len(paths)} 张图片：{directory}")
             QMessageBox.information(self, "导出成功", f"已导出 {len(paths)} 张 PNG 图片到：\n{directory}")
         except Exception as exc:
