@@ -130,14 +130,13 @@ class XingceCleaner:
 
     @staticmethod
     def _extract_positioned_lines(page) -> list[tuple[str, float, float]]:
-        page_dict = page.get_text("dict", sort=False)
+        page_dict = page.get_text("rawdict", sort=False)
         lines: list[tuple[str, float, float]] = []
         for block in page_dict.get("blocks", []):
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
-                spans = [span.get("text", "") for span in line.get("spans", [])]
-                text = "".join(spans).strip()
+                text = XingceCleaner._join_line_chars(line).strip()
                 if not text:
                     continue
                 bbox = line.get("bbox", (0, 0, 0, 0))
@@ -146,6 +145,35 @@ class XingceCleaner:
                 lines.append((text, y_mm, x_mm))
         lines.sort(key=lambda item: (round(item[1], 1), item[2]))
         return lines
+
+    @staticmethod
+    def _join_line_chars(line: dict) -> str:
+        """Join a rawdict line's chars, restoring word gaps as spaces.
+
+        Some PDFs render the separation between option words (e.g. idiom
+        pairs in 逻辑填空 options like "束手就擒 一探究竟") as a glyph-position
+        displacement instead of a real space character, so the extracted
+        span text arrives with the words glued together. Detect horizontal
+        gaps wider than 0.3 em between adjacent glyphs and insert a space
+        so the words stay separated downstream.
+        """
+        direction = line.get("dir", (1, 0))
+        horizontal = abs(direction[0]) >= 0.7
+        parts: list[str] = []
+        prev_x1: float | None = None
+        for span in line.get("spans", []):
+            size = span.get("size", 10.0) or 10.0
+            for char in span.get("chars", []):
+                c = char.get("c", "")
+                bbox = char.get("bbox")
+                if (horizontal and bbox and prev_x1 is not None
+                        and c != " " and parts and parts[-1] != " "
+                        and bbox[0] - prev_x1 >= size * 0.3):
+                    parts.append(" ")
+                if bbox:
+                    prev_x1 = bbox[2]
+                parts.append(c)
+        return "".join(parts)
 
     @staticmethod
     def _is_content_line_near_header(text: str, y_mm: float) -> bool:
