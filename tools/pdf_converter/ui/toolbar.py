@@ -9,6 +9,7 @@ class MainToolbar(QToolBar):
 
     home_clicked = pyqtSignal()
     open_clicked = pyqtSignal(str)
+    batch_clicked = pyqtSignal()
     save_clicked = pyqtSignal()
     convert_clicked = pyqtSignal()
 
@@ -33,6 +34,11 @@ class MainToolbar(QToolBar):
         self.btn_open.setFixedHeight(32)
         self.btn_open.clicked.connect(self._on_open)
         self.addWidget(self.btn_open)
+
+        self.btn_batch = QPushButton("📦 批量转换")
+        self.btn_batch.setFixedHeight(32)
+        self.btn_batch.clicked.connect(lambda: self.batch_clicked.emit())
+        self.addWidget(self.btn_batch)
 
         self.addSeparator()
 

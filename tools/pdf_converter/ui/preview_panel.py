@@ -7,13 +7,27 @@ from PyQt6.QtWidgets import (
     QScrollArea, QPushButton, QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtGui import QPixmap, QImage, QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent
+from pathlib import Path
+
+
+DRAG_BORDER_STYLE = (
+    "QScrollArea { border: 2px dashed #4F46E5; border-radius: 6px; background-color: #EEF2FF; }"
+)
+NO_DRAG_BORDER_STYLE = (
+    "QScrollArea { border: 2px dashed #EF4444; border-radius: 6px; background-color: #FEF2F2; }"
+)
+DEFAULT_BORDER_STYLE = (
+    "QScrollArea { border: 1px solid #E5E7EB; "
+    "border-radius: 4px; background-color: #F3F4F6; }"
+)
 
 
 class PDFPreviewWidget(QWidget):
     """单个PDF预览组件: 显示一个PDF的页面，支持翻页，自适应宽度。"""
 
     page_changed = pyqtSignal(int)
+    file_dropped = pyqtSignal(str)
 
     def __init__(self, title: str = "预览"):
         super().__init__()
@@ -21,6 +35,8 @@ class PDFPreviewWidget(QWidget):
         self._current_page = 0
         self._title = title
         self._cached_pixmap: QPixmap | None = None
+        self._accept_drops = False
+        self._drag_over = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -204,13 +220,73 @@ class PDFPreviewWidget(QWidget):
         except ValueError:
             pass
 
+    def enable_drops(self, enabled: bool = True):
+        """Enable or disable drag-and-drop file loading on this widget."""
+        self._accept_drops = enabled
+        self.setAcceptDrops(enabled)
+        if enabled and not self._doc:
+            self.image_label.setText("请打开PDF文件\n\n或拖入PDF文件到此处")
+
+    # ── drag & drop ──────────────────────────────────────────────
+
+    def _has_pdf_in_mime(self, mime_data) -> bool:
+        if not mime_data.hasUrls():
+            return False
+        for url in mime_data.urls():
+            if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() == ".pdf":
+                return True
+        return False
+
+    def dragEnterEvent(self, event: QDragEnterEvent | None):
+        if not self._accept_drops:
+            if event:
+                event.ignore()
+            return
+        if event and event.mimeData() and self._has_pdf_in_mime(event.mimeData()):
+            self._drag_over = True
+            self.scroll_area.setStyleSheet(DRAG_BORDER_STYLE)
+            event.acceptProposedAction()
+        elif event:
+            self.scroll_area.setStyleSheet(NO_DRAG_BORDER_STYLE)
+            event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent | None):
+        if not self._accept_drops:
+            if event:
+                event.ignore()
+            return
+        if event and event.mimeData() and self._has_pdf_in_mime(event.mimeData()):
+            self.scroll_area.setStyleSheet(DRAG_BORDER_STYLE)
+            event.acceptProposedAction()
+        elif event:
+            self.scroll_area.setStyleSheet(NO_DRAG_BORDER_STYLE)
+            event.ignore()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent | None):
+        self._drag_over = False
+        self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
+
+    def dropEvent(self, event: QDropEvent | None):
+        self._drag_over = False
+        self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
+        if not self._accept_drops or not event or not event.mimeData():
+            return
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                path = url.toLocalFile()
+                if Path(path).suffix.lower() == ".pdf":
+                    event.acceptProposedAction()
+                    self.file_dropped.emit(path)
+                    return
+        event.ignore() if event else None
+
     def clear(self):
         if self._doc:
             self._doc.close()
             self._doc = None
         self._current_page = 0
         self._cached_pixmap = None
-        self.image_label.setText("请打开PDF文件")
+        self.image_label.setText("请打开PDF文件" if not self._accept_drops else "请打开PDF文件\n\n或拖入PDF文件到此处")
         self.image_label.setPixmap(QPixmap())
         self.btn_prev.setEnabled(False)
         self.btn_next.setEnabled(False)
@@ -220,6 +296,8 @@ class PDFPreviewWidget(QWidget):
 
 class PreviewPanel(QWidget):
     """双栏预览面板: 左右对比原始PDF和转换后PDF。"""
+
+    file_dropped = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -232,6 +310,8 @@ class PreviewPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.input_preview = PDFPreviewWidget("📄 原始PDF")
+        self.input_preview.enable_drops(True)
+        self.input_preview.file_dropped.connect(self.file_dropped.emit)
         self.output_preview = PDFPreviewWidget("📝 转换后预览")
 
         splitter.addWidget(self.input_preview)
