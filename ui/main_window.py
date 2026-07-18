@@ -3,6 +3,7 @@
 import html
 import json
 import os
+import sys
 import traceback
 import urllib.error
 import urllib.request
@@ -53,16 +54,33 @@ DEFAULT_APP_METADATA = {
 
 def _load_app_metadata() -> dict:
     data = dict(DEFAULT_APP_METADATA)
+    # 收集所有可能的 version.json 路径
+    candidates: list[Path] = []
     try:
-        path = resource_path("version.json")
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            for key in data:
-                value = str(loaded.get(key, "")).strip()
-                if value:
-                    data[key] = value
+        candidates.append(resource_path("version.json"))
     except Exception:
         pass
+    if getattr(sys, "frozen", False):
+        # PyInstaller one-file: sys._MEIPASS 是解压后的临时目录
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(Path(meipass) / "version.json")
+        # 以及 exe 所在目录（某些情况下资源平铺在此）
+        candidates.append(Path(sys.executable).parent / "version.json")
+
+    for path in candidates:
+        try:
+            if not path.exists():
+                continue
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                for key in data:
+                    value = str(loaded.get(key, "")).strip()
+                    if value:
+                        data[key] = value
+                break  # 找到一个有效文件就停止
+        except Exception:
+            continue
     return data
 
 
@@ -807,6 +825,6 @@ class MainWindow(QMainWindow):
             "<p>面向公务员考试的小工具集合。</p>"
             f"<p><b>开发人:</b> {AUTHOR_NAME}<br>"
             f"<b>邮箱:</b> <a href=\"mailto:{AUTHOR_EMAIL}\">{AUTHOR_EMAIL}</a></p>"
-            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器、申论答题纸生成器</p>"
+            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器、申论答题纸生成器、PDF文件拼合</p>"
             "<p><b>Python + PyQt6 + PyMuPDF + ReportLab</b></p>",
         )

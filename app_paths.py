@@ -7,7 +7,10 @@ import sys
 def app_root() -> Path:
     """Return the directory that contains bundled application data."""
     if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).parent
     return Path(__file__).resolve().parent
 
 

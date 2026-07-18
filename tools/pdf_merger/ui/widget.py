@@ -781,6 +781,21 @@ class PdfMergerWidget(QWidget):
         self.btn_remove.setEnabled(False)
         btn_row.addWidget(self.btn_remove)
 
+        self.btn_clear = QPushButton("清空")
+
+        self.btn_clear.setStyleSheet(
+            "QPushButton {"
+            "  background-color: #FEF2F2; color: #DC2626;"
+            "  border: 1px solid #FECACA; border-radius: 6px;"
+            "  padding: 4px 10px; font-size: 12px; font-weight: 600;"
+            "  min-height: 26px;"
+            "}"
+            "QPushButton:hover { background-color: #FEE2E2; border-color: #FCA5A5; }"
+            "QPushButton:disabled { background-color: #F9FAFB; color: #D1D5DB; border-color: #E5E7EB; }"
+        )
+        self.btn_clear.setEnabled(False)
+        btn_row.addWidget(self.btn_clear)
+
         self.btn_add = QPushButton("＋ 添加文件")
         self.btn_add.setStyleSheet(
             "QPushButton {"
@@ -845,6 +860,7 @@ class PdfMergerWidget(QWidget):
         self.btn_down.clicked.connect(self._move_down)
         self.btn_add.clicked.connect(self._on_add_files)
         self.btn_remove.clicked.connect(self._on_remove_selected)
+        self.btn_clear.clicked.connect(self._on_clear_all)
         self.btn_merge.clicked.connect(self._on_merge)
         self.btn_save.clicked.connect(self._on_save)
 
@@ -901,6 +917,11 @@ class PdfMergerWidget(QWidget):
         for item in self.list_widget.selectedItems():
             self.list_widget.takeItem(self.list_widget.row(item))
         self._renumber_items()
+        self._update_summary()
+
+    def _on_clear_all(self):
+        self.list_widget.clear()
+        self.preview.clear()
         self._update_summary()
 
     def _move_up(self):
@@ -973,6 +994,7 @@ class PdfMergerWidget(QWidget):
         count = self.list_widget.count()
         has_files = count > 0
         self.btn_merge.setEnabled(has_files)
+        self.btn_clear.setEnabled(has_files)
         self._output_bytes = None
         self.btn_save.setEnabled(False)
         self.btn_save.setStyleSheet(SECONDARY_BTN)
