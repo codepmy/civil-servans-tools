@@ -429,8 +429,9 @@ class PdfPreviewPanel(QWidget):
 
         self.image_label = QLabel("")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._show_placeholder()
+        self.image_label.setStyleSheet("color: #9CA3AF; font-size: 14px; background: transparent;")
         self.scroll_area.setWidget(self.image_label)
+        self._show_placeholder_text()
         layout.addWidget(self.scroll_area, stretch=1)
 
         nav = QHBoxLayout()
@@ -463,24 +464,11 @@ class PdfPreviewPanel(QWidget):
         layout.addLayout(nav)
         self._update_nav()
 
-    def _show_placeholder(self):
-        placeholder = QWidget()
-        pl_layout = QVBoxLayout(placeholder)
-        pl_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pl_layout.setSpacing(8)
-
-        icon = QLabel("\U0001f4c4")  # 📄
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet("font-size: 40px; color: #D1D5DB; background: transparent; border: none;")
-        pl_layout.addWidget(icon)
-
-        hint = QLabel("在左侧选择文件即可预览")  # 在左侧选择文件即可预览
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("font-size: 13px; color: #9CA3AF; background: transparent; border: none;")
-        pl_layout.addWidget(hint)
-
-        self.scroll_area.setWidget(placeholder)
-        self._placeholder = placeholder
+    def _show_placeholder_text(self):
+        """在 image_label 上显示占位文字（不切换 scroll widget）。"""
+        self.image_label.setPixmap(QPixmap())
+        self.image_label.setText("在左侧选择文件即可预览")
+        self.image_label.setStyleSheet("color: #9CA3AF; font-size: 14px; background: transparent;")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -500,7 +488,7 @@ class PdfPreviewPanel(QWidget):
 
             self._doc = fitz.open(str(file_path))
             if self._doc.page_count == 0:
-                self._show_placeholder()
+                self._show_placeholder_text()
                 self._update_nav()
                 self.label_file_info.setText("0 页")
                 return
@@ -515,8 +503,8 @@ class PdfPreviewPanel(QWidget):
             self.label_file_info.setText(f"{self._doc.page_count} 页 / {size_text}")
 
         except Exception:
-            self._show_placeholder()
-            self.label_file_info.setText("加载失败")  # 加载失败
+            self._show_placeholder_text()
+            self.label_file_info.setText("加载失败")
             self._doc = None
             self._update_nav()
 
@@ -526,14 +514,16 @@ class PdfPreviewPanel(QWidget):
             self._doc = None
         self._current_page = 0
         self._pixmap = None
-        self._show_placeholder()
+        self._show_placeholder_text()
         self.label_file_info.setText("")
         self._update_nav()
 
     def _render_current_page(self):
         if not self._doc or self._doc.page_count == 0:
-            self._show_placeholder()
+            self._show_placeholder_text()
             return
+        self.image_label.setText("")
+        self.image_label.setStyleSheet("background: transparent;")
         page = self._doc[self._current_page]
         pix = page.get_pixmap(dpi=150, alpha=False)
         img = QImage(
@@ -541,7 +531,6 @@ class PdfPreviewPanel(QWidget):
             pix.stride, QImage.Format.Format_RGB888,
         )
         self._pixmap = QPixmap.fromImage(img)
-        self.scroll_area.setWidget(self.image_label)
         self._fit_to_view()
         self._update_nav()
 
