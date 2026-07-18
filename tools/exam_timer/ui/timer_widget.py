@@ -102,30 +102,34 @@ class TimerWidget(QWidget):
 
     def _setup_ui(self):
         root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(14)
         root.addWidget(self._build_left_panel(), stretch=5)
         root.addWidget(self._build_right_panel(), stretch=3)
 
     def _build_left_panel(self) -> QWidget:
         self.left_panel = QWidget()
+        self.left_panel.setObjectName("tool-page")
         self.left_panel.installEventFilter(self)
-        self.left_panel.setStyleSheet("background: #F8F7F4;")
 
         layout = QVBoxLayout(self.left_panel)
-        layout.setContentsMargins(48, 28, 48, 28)
-        layout.setSpacing(8)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(10)
 
+        # 顶栏：返回按钮 + 标题
         header = QHBoxLayout()
-        header.setSpacing(8)
-        self.btn_back = QPushButton("< 返回首页")
-        self.btn_back.setFixedSize(104, 34)
-        self.btn_back.setStyleSheet(
-            "QPushButton { background-color: #F3F4F6; border: 1px solid #E5E7EB; "
-            "border-radius: 17px; font-weight: 600; color: #374151; }"
-            "QPushButton:hover { background-color: #E5E7EB; border-color: #D1D5DB; }"
-        )
+        header.setSpacing(12)
+        self.btn_back = QPushButton("←")
+        self.btn_back.setObjectName("btn-back")
+        self.btn_back.setToolTip("返回首页")
         header.addWidget(self.btn_back)
+
+        title = QLabel("考试计时器")
+        title.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #111827;"
+            "background: transparent; border: none;"
+        )
+        header.addWidget(title)
         header.addStretch()
         layout.addLayout(header)
 
@@ -186,11 +190,12 @@ class TimerWidget(QWidget):
 
         for btn in (self.btn_countup, self.btn_countdown):
             btn.setStyleSheet(
-                "QRadioButton { padding: 6px 18px; border: 1px solid #D1D5DB; "
-                "border-radius: 6px; background: #FFFFFF; font-size: 14px; color: #374151; }"
+                "QRadioButton { padding: 7px 20px; border: 1px solid #D1D5DB; "
+                "border-radius: 8px; background: #FFFFFF; font-size: 13px; "
+                "font-weight: 500; color: #374151; }"
                 "QRadioButton:hover { border-color: #4F46E5; background: #F5F3FF; }"
                 "QRadioButton:checked { background: #EEF2FF; border-color: #4F46E5; "
-                "color: #4338CA; font-weight: 600; }"
+                "color: #4338CA; font-weight: 700; }"
             )
             layout.addWidget(btn)
 
@@ -276,15 +281,17 @@ class TimerWidget(QWidget):
 
     def _build_right_panel(self) -> QWidget:
         panel = QWidget()
-        panel.setMinimumWidth(320)
+        panel.setMinimumWidth(300)
         panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        panel.setStyleSheet("background: #FFFFFF; border-left: 1px solid #E5E7EB;")
+        panel.setStyleSheet(
+            "background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px;"
+        )
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
 
         title = QLabel("分段记录")
-        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #111827; border: none;")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #111827; border: none; background: transparent;")
         layout.addWidget(title)
 
         scroll = QScrollArea()

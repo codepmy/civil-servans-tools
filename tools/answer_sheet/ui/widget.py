@@ -69,6 +69,7 @@ class AnswerSheetPreview(QWidget):
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("color: #9CA3AF; font-size: 14px; background: transparent;")
         self.scroll_area.setWidget(self.image_label)
+        self.scroll_area.viewport().installEventFilter(self)
         layout.addWidget(self.scroll_area, stretch=1)
 
         nav = QHBoxLayout()
@@ -92,6 +93,12 @@ class AnswerSheetPreview(QWidget):
         super().resizeEvent(event)
         if self._cached_pixmap:
             self._fit_to_view()
+
+    def eventFilter(self, obj, event):
+        if obj is self.scroll_area.viewport() and event.type() == event.Type.Resize:
+            if self._cached_pixmap:
+                self._fit_to_view()
+        return super().eventFilter(obj, event)
 
     def load_pdf_bytes(self, pdf_bytes: bytes):
         if self._doc:
@@ -237,42 +244,43 @@ class AnswerSheetWidget(QWidget):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(14)
 
         top = QHBoxLayout()
-        top.setContentsMargins(12, 8, 12, 8)
-        top.setSpacing(8)
-        self.btn_back = QPushButton("<")
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(12)
+        self.btn_back = QPushButton("←")
+        self.btn_back.setObjectName("btn-back")
         self.btn_back.setToolTip("返回首页")
-        self.btn_back.setFixedSize(40, 32)
-        self.btn_back.setStyleSheet(
-            "QPushButton { background-color: #F3F4F6; border: 1px solid #E5E7EB; "
-            "border-radius: 17px; font-weight: 600; font-size: 16px; color: #374151; }"
-            "QPushButton:hover { background-color: #E5E7EB; border-color: #D1D5DB; }"
-        )
         top.addWidget(self.btn_back)
         title = QLabel("申论答题纸生成器")
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #111827;")
+        title.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #111827;"
+            "background: transparent; border: none;"
+        )
         top.addWidget(title)
         top.addStretch()
         root.addLayout(top)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(1)
         self.preview = AnswerSheetPreview()
         self.settings_panel = self._build_settings_panel()
-        self.settings_panel.setMinimumWidth(320)
-        self.settings_panel.setMaximumWidth(420)
+        self.settings_panel.setMinimumWidth(300)
+        self.settings_panel.setMaximumWidth(400)
         splitter.addWidget(self.preview)
         splitter.addWidget(self.settings_panel)
-        splitter.setSizes([980, 360])
+        splitter.setSizes([880, 360])
         root.addWidget(splitter, stretch=1)
 
     def _build_settings_panel(self) -> QWidget:
         panel = QWidget()
-        panel.setStyleSheet("background: #FFFFFF; border-left: 1px solid #E5E7EB;")
+        panel.setStyleSheet(
+            "background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px;"
+        )
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
         mode_box = QGroupBox("生成模式")
