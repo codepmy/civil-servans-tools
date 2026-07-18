@@ -78,12 +78,12 @@
 
 > 国内 GitHub 小白用户：优先使用蓝奏云下载，打开链接后直接下载 `CivilServansTools-v1.0.0-x64.exe`，速度通常比 GitHub Release 更稳、更接近满速。
 
-| 下载入口 | 推荐人群 | 链接                                                                           |
-| --- | --- |------------------------------------------------------------------------------|
-| 蓝奏云满速下载 | 国内用户优先 | [下载 公考小工具v1.0.0 安装包](https://wwanl.lanzoum.com/CivilServansTools)            |
-| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.0.0 Release](https://github.com/codepmy/civil-servans-tools/releases/tag/v1.0.0) |
+| 下载入口 | 推荐人群 | 链接                                                                                   |
+| --- | --- |--------------------------------------------------------------------------------------|
+| 蓝奏云满速下载 | 国内用户优先 | [下载 公考小工具v1.1.0 安装包](https://wwanl.lanzoum.com/CivilServansTools)                    |
+| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.1.0 Release](https://github.com/codepmy/civil-servans-tools/releases/tag/v1.1.0) |
 
-安装时只需要下载并运行 `CivilServansTools-v1.0.0-x64.exe`。
+安装时只需要下载并运行 `CivilServansTools-v1.1.0-x64.exe`。
 
 ## 🛠️ 技术栈
 
