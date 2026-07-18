@@ -14,7 +14,9 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -37,6 +39,7 @@ from tools.pdf_converter.ui.worker import ConversionWorker
 from tools.answer_sheet.core.generator import AnswerSheetGenerator
 from tools.answer_sheet.ui.widget import AnswerSheetWidget
 from tools.exam_timer.ui.timer_widget import TimerWidget
+from tools.pdf_merger.ui.widget import PdfMergerWidget
 
 
 DEFAULT_APP_METADATA = {
@@ -170,10 +173,12 @@ class MainWindow(QMainWindow):
             self._fonts,
             AnswerSheetGenerator(self._font_manager),
         )
+        self.pdf_merger_page = PdfMergerWidget()
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.pdf_tool_page)
         self.stack.addWidget(self.timer_tool_page)
         self.stack.addWidget(self.answer_sheet_page)
+        self.stack.addWidget(self.pdf_merger_page)
         self.setCentralWidget(self.stack)
 
         self.status_bar = QStatusBar()
@@ -191,52 +196,190 @@ class MainWindow(QMainWindow):
     def _create_home_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("home-page")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(56, 42, 56, 54)
-        layout.setSpacing(18)
 
-        title = QLabel("公考小工具")
-        title.setObjectName("home-title")
-        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(title)
+        # 外层使用垂直布局，去掉所有边距让 hero 撑满宽度
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        subtitle = QLabel("面向公务员考试备考的资料处理工具合集")
-        subtitle.setObjectName("home-subtitle")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(subtitle)
+        # ═══════════════════════════════════════════════════════
+        #  Hero 横幅
+        # ═══════════════════════════════════════════════════════
+        hero = QFrame()
+        hero.setObjectName("home-hero")
+        hero.setStyleSheet(
+            "QFrame#home-hero {"
+            "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
+            "    stop:0 #3730A3, stop:0.5 #4F46E5, stop:1 #6366F1);"
+            "  border: none;"
+            "}"
+        )
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(56, 48, 56, 44)
+        hero_layout.setSpacing(8)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
-        layout.addSpacing(14)
-        layout.addLayout(grid)
-        layout.addStretch(1)
+        # 顶行：品牌 + 版本号
+        hero_top_row = QHBoxLayout()
+        hero_top_row.setSpacing(12)
 
-        tool_names = ["📄 PDF内容格式转换", "⏱ 考试计时器", "📝 申论答题纸",
-                      "📋 待开发", "🔧 待开发", "📖 待开发",
-                      "🎯 待开发", "💡 待开发", "⚡ 待开发"]
-        for index, name in enumerate(tool_names):
-            button = QPushButton(name)
-            button.setObjectName("tool-card-primary" if index <= 2 else "tool-card-pending")
-            button.setMinimumHeight(100)
-            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            row, col = divmod(index, 3)
-            grid.addWidget(button, row, col)
-            if index == 0:
-                button.clicked.connect(self._show_pdf_tool)
-            elif index == 1:
-                button.clicked.connect(self._show_timer_tool)
-            elif index == 2:
-                button.clicked.connect(self._show_answer_sheet_tool)
-            else:
-                button.setEnabled(False)
+        # 图标 + 标题
+        hero_brand = QHBoxLayout()
+        hero_brand.setSpacing(12)
+
+        brand_icon = QLabel("📚")
+        brand_icon.setStyleSheet(
+            "font-size: 32px; background: transparent; border: none; color: #FFFFFF;"
+        )
+        hero_brand.addWidget(brand_icon)
+
+        brand_title = QLabel("公考小工具")
+        brand_title.setStyleSheet(
+            "font-size: 28px; font-weight: 800; color: #FFFFFF;"
+            "background: transparent; border: none; letter-spacing: 1px;"
+        )
+        hero_brand.addWidget(brand_title)
+        hero_top_row.addLayout(hero_brand)
+        hero_top_row.addStretch()
+
+        version_badge = QLabel(f"v{APP_VERSION}")
+        version_badge.setStyleSheet(
+            "font-size: 11px; font-weight: 600; color: #C7D2FE;"
+            "background: rgba(255,255,255,0.15); border-radius: 10px;"
+            "padding: 4px 14px;"
+        )
+        hero_top_row.addWidget(version_badge)
+
+        hero_layout.addLayout(hero_top_row)
+
+        # 副标题
+        hero_sub = QLabel("面向公务员考试备考的资料处理工具合集")
+        hero_sub.setStyleSheet(
+            "font-size: 14px; color: #C7D2FE; background: transparent; border: none;"
+        )
+        hero_sub.setContentsMargins(44, 0, 0, 0)
+        hero_layout.addWidget(hero_sub)
+
+        outer.addWidget(hero)
+
+        # ═══════════════════════════════════════════════════════
+        #  内容区
+        # ═══════════════════════════════════════════════════════
+        content = QWidget()
+        content.setStyleSheet("background-color: #F8F7F4;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(48, 32, 48, 36)
+        content_layout.setSpacing(0)
+
+        # ── 可用工具 ──
+        section_label = QLabel("可用工具")
+        section_label.setObjectName("home-section-title")
+        content_layout.addWidget(section_label)
+        content_layout.addSpacing(12)
+
+        active_tools = [
+            ("📄", "PDF内容格式转换",
+             "将粉笔/华图等 App 导出的 PDF 转换为国考标准真题格式",
+             self._show_pdf_tool),
+            ("⏱", "考试计时器",
+             "正计时 / 倒计时，大字显示，支持分段记录",
+             self._show_timer_tool),
+            ("📝", "申论答题纸",
+             "标准 25×24 格纸，分题/分页模式，导出 PDF 或图片",
+             self._show_answer_sheet_tool),
+            ("📎", "PDF文件拼合",
+             "多份 PDF 按序合并，拖拽排序，一键生成",
+             self._show_pdf_merger),
+        ]
+
+        active_grid = QGridLayout()
+        active_grid.setHorizontalSpacing(16)
+        active_grid.setVerticalSpacing(16)
+        for i, (icon, name, desc, handler) in enumerate(active_tools):
+            card = self._make_tool_card(icon, name, desc, handler)
+            row, col = divmod(i, 2)
+            active_grid.addWidget(card, row, col)
+        content_layout.addLayout(active_grid)
+
+        content_layout.addSpacing(32)
+
+        # ── 即将推出 ──
+        coming_label = QLabel("即将推出")
+        coming_label.setObjectName("home-section-title")
+        content_layout.addWidget(coming_label)
+        content_layout.addSpacing(10)
+
+        pending_row = QHBoxLayout()
+        pending_row.setSpacing(12)
+        for name in ["🔧 待开发", "📖 待开发", "🎯 待开发", "💡 待开发", "⚡ 待开发"]:
+            chip = QPushButton(name)
+            chip.setObjectName("tool-card-pending")
+            chip.setEnabled(False)
+            chip.setFixedHeight(48)
+            pending_row.addWidget(chip)
+        pending_row.addStretch()
+        content_layout.addLayout(pending_row)
+
+        content_layout.addStretch(1)
+
+        # ── 页脚 ──
+        footer = QLabel(
+            f"<span style='color:#B0B7C3;'>Made with ❤️ by </span>"
+            f"<span style='color:#9CA3AF; font-weight:600;'>{AUTHOR_NAME}</span>"
+        )
+        footer.setTextFormat(Qt.TextFormat.RichText)
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        footer.setStyleSheet("font-size: 12px; padding-top: 24px; background: transparent;")
+        content_layout.addWidget(footer)
+
+        outer.addWidget(content, stretch=1)
 
         return page
 
+    def _make_tool_card(
+        self, icon: str, name: str, desc: str, handler
+    ) -> QPushButton:
+        """创建统一风格的工具卡片按钮。"""
+        btn = QPushButton()
+        btn.setObjectName("tool-card")
+        btn.setMinimumHeight(110)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        # 用 QVBoxLayout 在按钮内放置图标 + 标题 + 描述
+        inner = QVBoxLayout()
+        inner.setContentsMargins(22, 18, 22, 18)
+        inner.setSpacing(6)
+
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet(
+            "font-size: 26px; background: transparent; border: none; padding: 0;"
+        )
+        inner.addWidget(icon_label)
+
+        name_label = QLabel(name)
+        name_label.setStyleSheet(
+            "font-size: 14px; font-weight: 700; color: #1F2937; "
+            "background: transparent; border: none; padding: 0;"
+        )
+        inner.addWidget(name_label)
+
+        desc_label = QLabel(desc)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet(
+            "font-size: 12px; color: #9CA3AF; background: transparent; border: none; padding: 0;"
+        )
+        inner.addWidget(desc_label)
+
+        inner.addStretch()
+        btn.setLayout(inner)
+        btn.clicked.connect(handler)
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        return btn
+
     def _create_pdf_tool_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("tool-page")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(12, 0, 12, 12)
         layout.setSpacing(0)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -274,6 +417,11 @@ class MainWindow(QMainWindow):
         self.toolbar.hide()
         self.status_bar.showMessage("申论答题纸生成器 - 设置页数或题目字数后导出")
 
+    def _show_pdf_merger(self):
+        self.stack.setCurrentWidget(self.pdf_merger_page)
+        self.toolbar.hide()
+        self.status_bar.showMessage("PDF文件拼合 - 添加PDF文件并按顺序拼合")
+
     def _connect_signals(self):
         self.toolbar.home_clicked.connect(self._show_home)
         self.toolbar.open_clicked.connect(self._on_open)
@@ -285,6 +433,8 @@ class MainWindow(QMainWindow):
         self.timer_tool_page.back_requested.connect(self._show_home)
         self.answer_sheet_page.back_requested.connect(self._show_home)
         self.answer_sheet_page.status_message.connect(self._show_answer_sheet_status)
+        self.pdf_merger_page.back_requested.connect(self._show_home)
+        self.pdf_merger_page.status_message.connect(self._show_merger_status)
 
     def _on_batch(self):
         dialog = BatchDialog(self._fonts, self)
@@ -292,6 +442,10 @@ class MainWindow(QMainWindow):
 
     def _show_answer_sheet_status(self, message: str):
         if self.stack.currentWidget() == self.answer_sheet_page:
+            self.status_bar.showMessage(message)
+
+    def _show_merger_status(self, message: str):
+        if self.stack.currentWidget() == self.pdf_merger_page:
             self.status_bar.showMessage(message)
 
     def _open_author_email(self, _link: str = ""):

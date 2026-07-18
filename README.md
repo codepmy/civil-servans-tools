@@ -92,7 +92,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone <repo-url>
+git clone https://github.com/codepmy/civil-servans-tools.git
 cd CivilServantsTools
 
 # 2. 一键安装环境
