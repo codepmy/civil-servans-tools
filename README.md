@@ -1,6 +1,6 @@
 # 🎉 公考小工具 v1.0.0 正式发布
 
-> 一款面向公务员考试备考者的桌面工具箱，帮助你将第三方刷题 App 导出的 PDF 试卷转换为标准真题格式，并提供计时练习与答题卡生成功能。
+> 一款面向公务员考试备考者的桌面工具箱，帮助你将第三方刷题 App 导出的 PDF 试卷转换为标准真题格式，并提供计时练习、答题卡生成与 PDF 拼合功能。
 
 ---
 
@@ -22,9 +22,11 @@
 | PDF 格式转换 | 将粉笔/华图/中公等刷题软件导出的 PDF 转换为国考标准格式，支持行测和申论 | [📖 使用说明](./tools/pdf_converter/docs/pdf-converter.md) |
 | 考试计时器 | 正计时 / 倒计时，大字显示，支持分段记录 | [📖 使用说明](./tools/exam_timer/docs/exam-timer.md) |
 | 申论答题纸生成器 | 生成 25x24 标准格答题纸，支持按页和按题目字数导出 PDF / 图片 | [📖 使用说明](./tools/answer_sheet/docs/answer-sheet.md) |
+| PDF 文件拼合 | 多个 PDF 按序合并为一个，拖拽排序，一键生成 | [📖 使用说明](./tools/pdf_merger/docs/pdf-merger.md) |
 
 ---
-## 🚀 三大核心功能
+
+## 🚀 四大核心功能
 
 ### 1. 📄 PDF 真题排版转换器（目前行测资料分析部分还存在一些缺陷）
 
@@ -60,7 +62,18 @@
 - **题目模式**：按题目字数要求自定义，自动分页、跨页连续排版、题间距可设
 - 导出为 **PDF**（ReportLab）或 **PNG 图片**（每页一张，PyMuPDF 渲染）
 
+### 4. 📎 PDF 文件拼合
+
+将多份 PDF 按自定义顺序合并为一份。
+
+- **拖拽添加**：直接拖入 PDF 文件到列表，支持批量选择
+- **拖拽排序**：列表内直接拖动调整合并顺序，半透明预览拖动目标
+- **实时预览**：选中文件即时预览全部页面，支持翻页浏览
+- **一键合并**：后台执行，进度可见，支持取消
+- **统一保存**：默认文件名 `拼合后.pdf`
+
 ---
+
 ## 立即下载 Windows 安装包
 
 > 国内 GitHub 小白用户：优先使用蓝奏云下载，打开链接后直接下载 `CivilServansTools-v1.0.0-x64.exe`，速度通常比 GitHub Release 更稳、更接近满速。
@@ -83,6 +96,8 @@
 | 图像处理 | Pillow | ≥ 10.0 |
 | 数据校验 | Pydantic | ≥ 2.0 |
 | 打包分发 | PyInstaller (单文件 exe) | — |
+
+**设计系统**：Slate + Indigo 统一配色，白色卡片 + 圆角 + 层次分明的排版风格。
 
 ---
 
@@ -117,11 +132,12 @@ CivilServantsTools/
 ├── main.py                 # 程序入口
 ├── app_paths.py            # 资源路径解析
 ├── version.json            # 版本与更新信息
-├── ui/                     # 主窗口、首页路由
+├── ui/                     # 主窗口、首页路由、通知组件
 ├── tools/
 │   ├── pdf_converter/      # PDF 排版转换器
 │   ├── exam_timer/         # 考试计时器
-│   └── answer_sheet/       # 答题卡生成器
+│   ├── answer_sheet/       # 答题卡生成器
+│   └── pdf_merger/         # PDF 文件拼合
 ├── resources/styles/       # 全局样式（Slate + Indigo 设计系统）
 ├── sample_input/           # 示例 PDF
 └── output/                 # 输出目录
@@ -177,7 +193,7 @@ Copyright (c) 2026 CivilServantsTools
 
 本项目基于 MIT License 开源（[详见License](LICENSE.md)）。项目代码可自由使用、修改、分发和商用，但需保留原始版权声明和许可证文本。
 
-本项目使用的第三方开源组件遵循其各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。用户在分发、修改或商用本项目时，应同时遵守相关第三方组件的许可证要求。
+本项目使用的第三方开源组件遵循其各自许可证，详见 [详见](THIRD_PARTY_NOTICES.md)。用户在分发、修改或商用本项目时，应同时遵守相关第三方组件的许可证要求。
 
 本软件仅作为学习、备考和办公辅助工具，不代表任何官方机构。
 
