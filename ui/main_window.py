@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app_paths import resource_path, user_config_path
+from ui.dialogs import show_info, show_success
 from tools.pdf_converter.ui.preview_panel import PreviewPanel
 from tools.pdf_converter.ui.progress_dialog import ProgressDialog
 from tools.pdf_converter.ui.settings_panel import SettingsPanel
@@ -581,7 +582,7 @@ class MainWindow(QMainWindow):
             with open(path, "wb") as f:
                 f.write(self._output_bytes)
             self.status_bar.showMessage(f"已保存: {path}")
-            QMessageBox.information(self, "保存成功", f"PDF已保存到:\n{path}")
+            show_success(self, "保存成功", f"PDF 已保存到：\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "保存失败", self._format_error(e))
             self.status_bar.showMessage("保存失败")
@@ -598,7 +599,7 @@ class MainWindow(QMainWindow):
         if self._update_worker and self._update_worker.isRunning():
             if silent:
                 return
-            QMessageBox.information(self, "检查更新", "正在检查更新，请稍候。")
+            show_info(self, "检查更新", "正在检查更新，请稍候。")
             return
 
         self._update_check_silent = silent
@@ -628,10 +629,10 @@ class MainWindow(QMainWindow):
         else:
             if self._update_check_silent:
                 return
-            QMessageBox.information(
+            show_info(
                 self,
                 "检查更新",
-                f"当前已是最新版本。\n\n当前版本：{APP_VERSION}\n远程版本：{remote_version}",
+                f"当前已是最新版本。\n当前版本：{APP_VERSION}\n远程版本：{remote_version}",
             )
             self.status_bar.showMessage("当前已是最新版本")
 

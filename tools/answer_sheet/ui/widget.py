@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ui.dialogs import show_success
 from tools.answer_sheet.core.generator import (
     AnswerSheetConfig,
     AnswerSheetGenerator,
@@ -548,7 +549,7 @@ class AnswerSheetWidget(QWidget):
             with open(path, "wb") as f:
                 f.write(self._pdf_bytes)
             self.status_message.emit(f"已导出 PDF：{path}")
-            QMessageBox.information(self, "导出成功", f"PDF 已保存到：\n{path}")
+            show_success(self, "导出成功", f"PDF 已保存到：\n{path}")
         except Exception as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 
@@ -563,7 +564,7 @@ class AnswerSheetWidget(QWidget):
             base_name = self._default_export_name()
             paths = self._generator.export_pngs(self._pdf_bytes, Path(directory), base_name=base_name)
             self.status_message.emit(f"已导出 {len(paths)} 张图片：{directory}")
-            QMessageBox.information(self, "导出成功", f"已导出 {len(paths)} 张 PNG 图片到：\n{directory}")
+            show_success(self, "导出成功", f"已导出 {len(paths)} 张 PNG 图片到：\n{directory}")
         except Exception as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 
