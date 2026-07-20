@@ -187,6 +187,12 @@ class SettingsPanel(QWidget):
         self.chk_page_num.setChecked(True)
         self.chk_page_num.toggled.connect(self._on_config_changed)
         d_layout.addWidget(self.chk_page_num)
+
+        self.chk_keep_last_page = QCheckBox("保留尾页（对答案二维码）")
+        self.chk_keep_last_page.setChecked(False)
+        self.chk_keep_last_page.setToolTip("勾选后，源PDF最后一页（通常含扫码对答案二维码）将原样保留在输出末尾")
+        self.chk_keep_last_page.toggled.connect(self._on_config_changed)
+        d_layout.addWidget(self.chk_keep_last_page)
         layout.addWidget(grp_display)
 
         # === 页边距 ===
@@ -300,6 +306,7 @@ class SettingsPanel(QWidget):
         self.spin_opt_indent.setValue(8.0)
         self.chk_answer_line.setChecked(False)
         self.chk_page_num.setChecked(True)
+        self.chk_keep_last_page.setChecked(False)
         self._apply_paper_margins(self.combo_paper.currentText())
 
     def get_config(self) -> dict:
@@ -319,6 +326,7 @@ class SettingsPanel(QWidget):
             "option_indent": self.spin_opt_indent.value(),
             "show_answer_line": self.chk_answer_line.isChecked(),
             "show_page_number": self.chk_page_num.isChecked(),
+            "keep_last_page": self.chk_keep_last_page.isChecked(),
             "margin_top": self._margin_spins["spin_margin_top"].value(),
             "margin_bottom": self._margin_spins["spin_margin_bottom"].value(),
             "margin_left": self._margin_spins["spin_margin_left"].value(),

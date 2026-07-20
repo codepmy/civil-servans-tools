@@ -51,7 +51,7 @@
 
 **文本型 PDF**（`TextParser`）：PyMuPDF 逐行提取 text spans，保留字体名、字号、加粗属性和毫米坐标。同时通过 image xref、drawings、visual region erasure 三种方式提取图片块。
 
-**扫描型 PDF**（`OCRParser`）：将页面渲染为 300 DPI 图片，PaddleOCR 中文识别，置信度 ≥ 0.5 的文本保留。
+**扫描型 PDF**（`OCRParser`）：将页面渲染为 200 DPI 图片，EasyOCR 中文识别，CUDA 可用时通过 PyTorch 使用 NVIDIA GPU，置信度 ≥ 0.5 的文本保留。
 
 自动判断 PDF 类型：平均每页字符 > 20 为文本型，否则回退 OCR。
 
@@ -155,7 +155,7 @@
 
 ## 注意事项
 
-- OCR 首次使用自动下载模型（约 500MB），需网络通畅
-- 文本型 PDF 约 1~3 秒，扫描件约 2~5 秒/页
+- OCR 首次使用自动下载模型（约 200MB），需网络通畅
+- 文本型 PDF 约 1~3 秒；扫描件速度取决于 OCR 后端，GPU 模式明显快于 CPU 模式
 - 字体自动检测 `C:\Windows\Fonts`，缺失时自动回退
 - 输出 PDF 嵌入字体子集，任意设备可正常显示
