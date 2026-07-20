@@ -52,29 +52,29 @@ class DropListWidget(QListWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setDragDropMode(QListWidget.DragDropMode.NoDragDrop)
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self._drag_ok = False
+        self._drag_over = False
 
     def dragEnterEvent(self, event: QDragEnterEvent | None):
         if event and event.mimeData() and self._has_pdf(event.mimeData()):
-            self._drag_ok = True
+            self._drag_over = True
             self.setStyleSheet(DRAG_BORDER)
             event.acceptProposedAction()
         elif event:
-            self.setStyleSheet(NO_DRAG_BORDER)
             event.ignore()
 
     def dragMoveEvent(self, event: QDragMoveEvent | None):
-        if self._drag_ok and event:
+        if self._drag_over and event and event.mimeData() and self._has_pdf(event.mimeData()):
             event.acceptProposedAction()
+        elif event:
+            event.ignore()
 
     def dragLeaveEvent(self, event):
-        self._drag_ok = False
+        self._drag_over = False
         self.setStyleSheet(DEFAULT_BORDER)
 
     def dropEvent(self, event: QDropEvent | None):
-        self._drag_ok = False
+        self._drag_over = False
         self.setStyleSheet(DEFAULT_BORDER)
         if not event or not event.mimeData():
             return
@@ -179,8 +179,12 @@ class BatchDialog(QDialog):
         self.btn_start.setStyleSheet(PRIMARY_BTN)
         self.btn_save_all = QPushButton("💾 全部保存")
         self.btn_save_all.setEnabled(False)
+        self.btn_merge = QPushButton("📎 拼合导出")
+        self.btn_merge.setEnabled(False)
+        self.btn_merge.setToolTip("将所有转换成功的PDF按列表顺序拼合成一个文件")
         action_row.addWidget(self.btn_start)
         action_row.addWidget(self.btn_save_all)
+        action_row.addWidget(self.btn_merge)
         action_row.addStretch()
         right_layout.addLayout(action_row)
 
@@ -196,6 +200,7 @@ class BatchDialog(QDialog):
         )
         self.btn_start.clicked.connect(self._on_start)
         self.btn_save_all.clicked.connect(self._on_save_all)
+        self.btn_merge.clicked.connect(self._on_merge)
 
     # ── 逻辑 ─────────────────────────────────────────────────
 
@@ -276,6 +281,7 @@ class BatchDialog(QDialog):
         self.label_status.setText(f"完成！成功 {ok} 个，失败 {fail} 个")
         self.btn_start.setEnabled(True)
         self.btn_save_all.setEnabled(ok > 0)
+        self.btn_merge.setEnabled(ok > 0)
         self.progress_bar.setValue(100)
 
     def _on_save_all(self):
@@ -296,3 +302,32 @@ class BatchDialog(QDialog):
             out_path.write_bytes(pdf_bytes)
             saved += 1
         show_success(self, "保存完成", f"已保存 {saved} 个文件到：\n{directory}")
+
+    def _on_merge(self):
+        """将所有转换成功的 PDF 按列表顺序拼合成一个文件。"""
+        if not self._results:
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "拼合导出", "合并.pdf", "PDF文件 (*.pdf)"
+        )
+        if not path:
+            return
+
+        import fitz
+
+        merged = fitz.open()
+        # 按文件列表顺序（而非 _results dict 顺序）拼接
+        for i in range(self.list_widget.count()):
+            filepath = self.list_widget.item(i).data(Qt.ItemDataRole.UserRole)
+            filename = Path(filepath).name
+            pdf_bytes = self._results.get(filename)
+            if pdf_bytes is None:
+                continue
+            src = fitz.open(stream=pdf_bytes, filetype="pdf")
+            merged.insert_pdf(src)
+            src.close()
+
+        merged.save(path)
+        merged.close()
+        show_success(self, "拼合完成", f"已拼合 {len(self._results)} 个文件到：\n{path}")

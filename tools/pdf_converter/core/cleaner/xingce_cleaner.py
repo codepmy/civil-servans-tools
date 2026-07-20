@@ -32,8 +32,8 @@ class XingceCleaner:
     """Extract Xingce questions while preserving source positions for image layout."""
 
     QUESTION_NUM_RE = re.compile(r"^\s*(\d+)\s*[\.\uff0e\u3001\u3002]\s*")
-    OPTION_RE = re.compile(r"^\s*([A-D])\s*[\.\uff0e\)\uff09]\s*")
-    INLINE_OPTION_RE = re.compile(r"([A-D])\s*[\.\uff0e\)\uff09]\s*")
+    OPTION_RE = re.compile(r"^\s*([A-D])\s*[\.\uff0e\u3002_\-\u2014\u4e00\)\uff09]\s*")
+    INLINE_OPTION_RE = re.compile(r"([A-D])\s*[\.\uff0e\u3002_\-\u2014\u4e00\)\uff09]\s*")
     SECTION_RE = re.compile(r"^\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+\s*[\.\uff0e\u3001\u3002]\s*")
 
     DEFAULT_SECTION_PATTERNS = (
@@ -90,6 +90,12 @@ class XingceCleaner:
                     continue
                 if self._is_data_analysis_heading(stripped):
                     in_data_analysis = True
+                is_scanned_question_number = (
+                    doc.source_type == "image"
+                    and re.fullmatch(r"\d{1,3}", stripped)
+                    and x_mm <= 38.0
+                    and HEADER_CUTOFF_MM <= y_mm <= min(FOOTER_START_MM, page.height_mm - 12)
+                )
                 if in_data_analysis and self._is_inside_visual_region(
                     stripped, y_mm, x_mm, visual_regions_by_page.get(page.page_number, [])
                 ):
@@ -103,11 +109,11 @@ class XingceCleaner:
                         if y_mm < HEADER_CUTOFF_MM
                         else self._is_content_line_near_footer(stripped, y_mm, page.height_mm)
                     )
-                    if not is_section_instruction and not is_content_line:
+                    if not is_scanned_question_number and not is_section_instruction and not is_content_line:
                         filtered_out.append(f"[header-footer] {stripped[:50]}")
                         continue
 
-                if self._is_page_number(stripped):
+                if not is_scanned_question_number and self._is_page_number(stripped):
                     filtered_out.append(f"[page-number] {stripped[:50]}")
                     continue
 
@@ -116,6 +122,9 @@ class XingceCleaner:
                     continue
 
                 all_lines.append((stripped, page.page_number, y_mm, x_mm))
+
+        if doc.source_type == "image":
+            all_lines = self._normalize_scanned_lines(all_lines)
 
         if pdf_doc:
             pdf_doc.close()
@@ -129,6 +138,11 @@ class XingceCleaner:
         return CleanedDocument(exam_type="xingce", questions=questions, filtered_out=filtered_out)
 
     @staticmethod
+    def _replace_blank_markers(text: str) -> str:
+        """将 PDF 中的空白占位符（\xa0）替换为可见下划线。"""
+        return text.replace('\xa0', '__')
+
+    @staticmethod
     def _extract_positioned_lines(page) -> list[tuple[str, float, float]]:
         page_dict = page.get_text("rawdict", sort=False)
         lines: list[tuple[str, float, float]] = []
@@ -136,7 +150,8 @@ class XingceCleaner:
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
-                text = XingceCleaner._join_line_chars(line).strip()
+                text = XingceCleaner._join_line_chars(line)
+                text = XingceCleaner._replace_blank_markers(text).strip()
                 if not text:
                     continue
                 bbox = line.get("bbox", (0, 0, 0, 0))
@@ -302,6 +317,169 @@ class XingceCleaner:
     def _normalize_instruction_text(text: str) -> str:
         return re.sub(r"\s+", "", (text or "").strip())
 
+    @classmethod
+    def _normalize_scanned_lines(cls, lines: list[tuple]) -> list[tuple]:
+        """Repair common EasyOCR splits before question extraction.
+
+        Scanned PDFs often recognize left-margin question numbers as bare
+        "2" instead of "2.", and option labels as standalone "C" with
+        the option body in a nearby block on the same visual row.
+        """
+        normalized: list[tuple] = []
+        sorted_lines = lines
+        first_content = cls._first_scanned_content_line(sorted_lines)
+        first_marker = cls._first_scanned_question_marker(sorted_lines)
+        if cls._needs_synthetic_first_question(first_content, first_marker):
+            normalized.append(("1.", first_content[1], first_content[2], min(first_content[3], 29.0)))
+        index = 0
+        while index < len(sorted_lines):
+            item = sorted_lines[index]
+            if item[0] == SECTION_MARKER:
+                normalized.append(item)
+                index += 1
+                continue
+
+            text = str(item[0]).strip()
+            page = item[1]
+            y_mm = item[2] if len(item) > 2 else 0.0
+            x_mm = item[3] if len(item) > 3 else 0.0
+
+            if re.fullmatch(r"\d{1,3}", text) and x_mm <= 38.0:
+                normalized.append((f"{text}.", page, y_mm, x_mm))
+                index += 1
+                continue
+
+            leading_num = re.match(r"^(\d{1,3})\s+(.+)$", text)
+            if leading_num and x_mm <= 38.0:
+                q_num = int(leading_num.group(1))
+                if 1 <= q_num <= 200:
+                    normalized.append((f"{q_num}. {leading_num.group(2).strip()}", page, y_mm, x_mm))
+                    index += 1
+                    continue
+
+            label_match = re.fullmatch(r"([A-D])\s*[_\-—一.]?", text)
+            if label_match and x_mm <= 38.0:
+                merged = cls._merge_scanned_option_label(label_match.group(1), item, sorted_lines, index)
+                if merged:
+                    normalized.append(merged[0])
+                    index = merged[1]
+                    continue
+
+            inferred_label = cls._infer_missing_option_label(item, sorted_lines, index)
+            if inferred_label:
+                normalized.append((f"{inferred_label}.{text}", page, y_mm, x_mm))
+                index += 1
+                continue
+
+            normalized.append(item)
+            index += 1
+
+        return normalized
+
+    @classmethod
+    def _merge_scanned_option_label(cls, label: str, item: tuple, lines: list[tuple], index: int) -> tuple[tuple, int] | None:
+        page = item[1]
+        y_mm = item[2] if len(item) > 2 else 0.0
+        x_mm = item[3] if len(item) > 3 else 0.0
+        bodies: list[str] = []
+        next_index = index + 1
+        while next_index < len(lines):
+            candidate = lines[next_index]
+            if candidate[0] == SECTION_MARKER:
+                break
+            cand_page = candidate[1]
+            cand_y = candidate[2] if len(candidate) > 2 else 0.0
+            cand_x = candidate[3] if len(candidate) > 3 else 0.0
+            cand_text = str(candidate[0]).strip()
+            if cand_page != page or abs(cand_y - y_mm) > 2.0:
+                break
+            if cand_x <= x_mm + 2.0:
+                break
+            if cls.QUESTION_NUM_RE.match(cand_text) or re.fullmatch(r"\d{1,3}", cand_text):
+                break
+            bodies.append(cand_text)
+            next_index += 1
+
+        if not bodies:
+            return None
+        return (f"{label}.{' '.join(bodies)}", page, y_mm, x_mm), next_index
+
+    @classmethod
+    def _first_scanned_question_marker(cls, lines: list[tuple]) -> tuple | None:
+        for item in lines:
+            if item[0] == SECTION_MARKER:
+                continue
+            text = str(item[0]).strip()
+            x_mm = item[3] if len(item) > 3 else 0.0
+            if x_mm > 38.0:
+                continue
+            if cls.QUESTION_NUM_RE.match(text) or re.fullmatch(r"\d{1,3}", text):
+                return item
+            if re.match(r"^(\d{1,3})\s+.+$", text):
+                return item
+        return None
+
+    @staticmethod
+    def _needs_synthetic_first_question(first_content: tuple | None, first_marker: tuple | None) -> bool:
+        if not first_content:
+            return False
+        if not first_marker:
+            return True
+        content_page = first_content[1]
+        content_y = first_content[2] if len(first_content) > 2 else 0.0
+        marker_page = first_marker[1]
+        marker_y = first_marker[2] if len(first_marker) > 2 else 0.0
+        return marker_page > content_page or (marker_page == content_page and marker_y - content_y > 18.0)
+
+    @staticmethod
+    def _first_scanned_content_line(lines: list[tuple]) -> tuple | None:
+        for item in lines:
+            if item[0] == SECTION_MARKER:
+                continue
+            text = str(item[0]).strip()
+            if not text or re.fullmatch(r"\d{1,3}", text):
+                continue
+            page = item[1]
+            y_mm = item[2] if len(item) > 2 else 0.0
+            x_mm = item[3] if len(item) > 3 else 0.0
+            compact = re.sub(r"\s+", "", text)
+            if page == 1 and y_mm > HEADER_CUTOFF_MM and x_mm <= 45.0 and len(compact) >= 10:
+                return item
+        return None
+
+    @classmethod
+    def _infer_missing_option_label(cls, item: tuple, lines: list[tuple], index: int) -> str | None:
+        text = str(item[0]).strip()
+        if cls.OPTION_RE.match(text) or cls.QUESTION_NUM_RE.match(text):
+            return None
+        page = item[1]
+        y_mm = item[2] if len(item) > 2 else 0.0
+        x_mm = item[3] if len(item) > 3 else 0.0
+        if x_mm < 48.0 or x_mm > 130.0 or len(re.sub(r"\s+", "", text)) < 6:
+            return None
+        prev_label = None
+        prev_same_row_label = None
+        for prev in reversed(lines[:index]):
+            if prev[0] == SECTION_MARKER:
+                continue
+            prev_page = prev[1]
+            prev_y = prev[2] if len(prev) > 2 else 0.0
+            prev_x = prev[3] if len(prev) > 3 else 0.0
+            prev_text = str(prev[0]).strip()
+            match = cls.OPTION_RE.match(prev_text)
+            if match:
+                prev_label = match.group(1)
+                if prev_page == page and abs(prev_y - y_mm) <= 2.0 and prev_x < x_mm:
+                    prev_same_row_label = prev_label
+                    break
+            if cls.QUESTION_NUM_RE.match(prev_text):
+                break
+        if prev_same_row_label == "A":
+            return "B"
+        if prev_same_row_label == "C":
+            return "D"
+        return None
+
     def _extract_questions(self, lines: list[tuple]) -> list[Question]:
         questions: list[Question] = []
         current_q: Question | None = None
@@ -421,6 +599,18 @@ class XingceCleaner:
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
                 continue
 
+            if self._starts_new_scanned_question_without_number(
+                line, current_q, current_option, current_page, y_mm, x_mm, last_page, last_y_mm
+            ):
+                finish_current_question()
+                inferred_num = (last_question_num or 0) + 1
+                current_q = Question(number=inferred_num, stem="", source_page=current_page)
+                current_q.source_y_mm = y_mm
+                stem_lines = [line]
+                current_option = None
+                last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
+                continue
+
             if current_q:
                 # After all 4 options are collected, lines from pages 2+ beyond
                 # the question's source page are likely watermark/ad content,
@@ -429,6 +619,23 @@ class XingceCleaner:
                     last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
                     continue
                 if current_option:
+                    split_continuation = self._split_option_continuation_with_next_labels(line, current_q)
+                    if split_continuation:
+                        prefix, extra_options = split_continuation
+                        if prefix:
+                            missing_label = self._next_option_label(current_q)
+                            if missing_label and missing_label != current_option.label:
+                                current_option = Option(label=missing_label, text=prefix)
+                                current_q.options.append(current_option)
+                            else:
+                                current_option.text = self._append_option_continuation(
+                                    current_option.text, prefix, current_page, y_mm, x_mm, last_page, last_y_mm, last_x_mm
+                                )
+                        for label, text_part in extra_options:
+                            current_option = Option(label=label, text=text_part)
+                            current_q.options.append(current_option)
+                        last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
+                        continue
                     current_option.text = self._append_option_continuation(
                         current_option.text, line, current_page, y_mm, x_mm, last_page, last_y_mm, last_x_mm
                     )
@@ -453,6 +660,36 @@ class XingceCleaner:
             options.append((match.group(1), line[match.end():end].strip()))
         return options
 
+    @classmethod
+    def _split_option_continuation_with_next_labels(cls, line: str, current_q: Question | None) -> tuple[str, list[tuple[str, str]]] | None:
+        if not current_q or not current_q.options:
+            return None
+        matches = list(cls.INLINE_OPTION_RE.finditer(line or ""))
+        if not matches:
+            return None
+        labels = [match.group(1) for match in matches]
+        if labels != sorted(labels) or len(set(labels)) != len(labels):
+            return None
+        prefix = line[:matches[0].start()].strip()
+        extra_options: list[tuple[str, str]] = []
+        for idx, match in enumerate(matches):
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(line)
+            extra_options.append((match.group(1), line[match.end():end].strip()))
+        existing = {option.label for option in current_q.options}
+        if any(label in existing for label, _ in extra_options):
+            return None
+        return prefix, extra_options
+
+    @staticmethod
+    def _next_option_label(current_q: Question | None) -> str | None:
+        if not current_q:
+            return None
+        labels = [option.label for option in current_q.options]
+        for label in ("A", "B", "C", "D"):
+            if label not in labels:
+                return label
+        return None
+
     @staticmethod
     def _append_option_continuation(
         current_text: str,
@@ -476,6 +713,34 @@ class XingceCleaner:
         if same_source_line and not current_text.endswith(" "):
             return f"{current_text}  {line}"
         return f"{current_text}{line}"
+
+    @staticmethod
+    def _starts_new_scanned_question_without_number(
+        line: str,
+        current_q: Question | None,
+        current_option: Option | None,
+        current_page: int,
+        y_mm: float,
+        x_mm: float,
+        last_page: int | None,
+        last_y_mm: float | None,
+    ) -> bool:
+        if not current_q or not current_option:
+            return False
+        if XingceCleaner.OPTION_RE.match(line) or XingceCleaner.QUESTION_NUM_RE.match(line):
+            return False
+        compact = re.sub(r"\s+", "", line or "")
+        if len(compact) < 14 or not re.search(r"[\u4e00-\u9fff]", compact):
+            return False
+        if x_mm > 45.0:
+            return False
+        if last_page == current_page and last_y_mm is not None and y_mm - last_y_mm < 7.0:
+            return False
+        if re.match(r"^(?:19|20)\d{2}", compact):
+            return True
+        if compact.startswith(("这段文字", "上述材料", "上述文字", "文段")):
+            return False
+        return len(current_q.options) >= 1 and (last_page != current_page or y_mm - (last_y_mm or y_mm) >= 9.0)
 
     @staticmethod
     def _starts_new_material_after_options(

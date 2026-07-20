@@ -908,6 +908,13 @@ class LayoutEngine:
         # e.g. 155×8mm horizontal rule). These are page ornaments, not content.
         if img.height_mm < 15 and img.width_mm > img.height_mm * 5:
             return
+        # Skip full-width page-top decoration images (banners, backgrounds).
+        # These are often PDF rendering artifacts — a screenshot of the page
+        # header area that duplicates the already-extracted text content.
+        # Criteria: near-full page width, starts at page top (y < 5mm),
+        # and shorter than 40% of page height (to keep full-page scans).
+        if img.width_mm > page_w * 0.90 and img.bbox[1] < 5 and img.height_mm < page_h * 0.4:
+            return
         scale = min(
             self.content_width / max(img.width_mm, 1),
             (self.content_bottom - self.content_top) / max(img.height_mm, 1),

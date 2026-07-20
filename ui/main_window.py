@@ -562,12 +562,71 @@ class MainWindow(QMainWindow):
     def _on_error(self, error_msg: str):
         self._close_progress_dialog()
 
+        # 用户主动取消 — 静默处理
+        if "用户已取消转换" in error_msg:
+            self.status_bar.showMessage("转换已取消")
+            return
+
+        # 检测是否缺少 OCR 依赖
+        if "当前环境未安装 OCR 依赖" in error_msg:
+            self._show_ocr_install_dialog(error_msg)
+            return
+
         QMessageBox.critical(
             self,
             "转换失败",
             f"转换过程中出现错误:\n\n{error_msg}\n\n请确认PDF内容为公务员考试题目格式。",
         )
         self.status_bar.showMessage("转换失败")
+
+    def _show_ocr_install_dialog(self, error_msg: str):
+        """弹出 OCR 依赖安装对话框。"""
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("缺少 OCR 依赖")
+        msg.setText(
+            "该 PDF 为扫描版/图片型，需要安装 OCR 引擎才能识别文字。\n\n"
+            "是否运行 setup.bat 自动安装？"
+        )
+        msg.setInformativeText(error_msg.split("\n")[-1] if "\n" in error_msg else "")
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+        install_btn = msg.button(QMessageBox.StandardButton.Yes)
+        install_btn.setText("安装 OCR 依赖")
+        install_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
+        cancel_btn = msg.button(QMessageBox.StandardButton.No)
+        cancel_btn.setText("取消")
+
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            self._run_setup_bat()
+
+    def _run_setup_bat(self):
+        """运行 setup.bat 安装 OCR 依赖。"""
+        bat_path = resource_path("setup.bat")
+        if not bat_path.exists():
+            # frozen 环境可能未打包 setup.bat，尝试 exe 同级目录
+            if getattr(sys, "frozen", False):
+                bat_path = Path(sys.executable).parent / "setup.bat"
+        if not bat_path.exists():
+            QMessageBox.warning(
+                self, "未找到安装脚本",
+                "setup.bat 不在程序目录，请从源码目录手动运行。\n\n"
+                "1. 打开源码目录\n"
+                "2. 双击 setup.bat\n"
+                "3. 等待安装完成后重新启动程序"
+            )
+            return
+        self.status_bar.showMessage("正在安装 OCR 依赖，请稍候...")
+        try:
+            os.startfile(str(bat_path))
+            QMessageBox.information(
+                self, "正在安装",
+                "setup.bat 正在运行，安装完成后请重新启动程序。"
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "启动安装失败", str(exc))
 
     def _on_worker_finished(self):
         if self._worker:

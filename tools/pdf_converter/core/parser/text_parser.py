@@ -69,7 +69,8 @@ class TextParser(BaseParser):
                 keep_header_line = self._is_content_line_near_header(line_text, line_y0)
                 keep_footer_line = self._is_content_line_near_footer(line_text, line_y0, height_mm)
                 for span in line.get("spans", []):
-                    text = span.get("text", "").strip()
+                    text = span.get("text", "")
+                    text = self._replace_blank_markers(text).strip()
                     if not text:
                         continue
                     bbox_pt = span["bbox"]
@@ -98,6 +99,15 @@ class TextParser(BaseParser):
             width_mm=width_mm,
             height_mm=height_mm,
         )
+
+    @staticmethod
+    def _replace_blank_markers(text: str) -> str:
+        """将 PDF 中的空白占位符（\xa0）替换为可见下划线。
+
+        逻辑填空等题型中，PDF 使用不间断空格 U+00A0 作为空白占位，
+        此处将其替换为双下划线 __ 以在输出中保持可见。
+        """
+        return text.replace('\xa0', '__')
 
     @staticmethod
     def _is_content_line_near_header(text: str, y_mm: float) -> bool:
