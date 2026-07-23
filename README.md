@@ -23,10 +23,11 @@
 | 考试计时器 | 正计时 / 倒计时，大字显示，支持分段记录 | [📖 使用说明](./tools/exam_timer/docs/exam-timer.md) |
 | 申论答题纸生成器 | 生成 25x24 标准格答题纸，支持按页和按题目字数导出 PDF / 图片 | [📖 使用说明](./tools/answer_sheet/docs/answer-sheet.md) |
 | PDF 文件拼合 | 多个 PDF 按序合并为一个，拖拽排序，一键生成 | [📖 使用说明](./tools/pdf_merger/docs/pdf-merger.md) |
+| OCR 文字识别 | 图片文字提取，支持印刷体/手写体，复制或导出 TXT | [📖 使用说明](./tools/ocr_recognizer/docs/ocr-recognizer.md) |
 
 ---
 
-## 🚀 四大核心功能
+## 🚀 五大核心功能
 
 ### 1. 📄 PDF 真题排版转换器（目前行测资料分析部分还存在一些缺陷）
 
@@ -34,7 +35,7 @@
 
 `注：由于粉笔是使用Skia/Chromium PDF引擎生成，在文字提取上，可能会出发性能问题，导致提取较慢`
 
-- **双引擎解析**：自动识别 PDF 类型，文字型走 PyMuPDF 文本解析，扫描型走 EasyOCR + PyTorch 图文识别，CUDA 可用时自动启用 GPU（`注：目前只支持英伟达显卡`）
+- **双引擎解析**：自动识别 PDF 类型，文字型走 PyMuPDF 文本解析，扫描型走 PaddleOCR + PaddlePaddle 图文识别，CUDA 可用时自动启用 GPU（`注：目前只支持英伟达显卡`）
 - **智能清洗**：
     - 行测卷：自动去除水印、广告、二维码；识别题号与选项（A/B/C/D）；按五大模块归类（政治理论/常识判断、言语理解与表达、数量关系、判断推理、资料分析）；过滤页码等干扰信息
     - 申论卷：提取给定材料段落；分离作答要求；识别双栏排版；跳过答题卡页面
@@ -72,6 +73,17 @@
 - **一键合并**：后台执行，进度可见，支持取消
 - **统一保存**：默认文件名 `拼合后.pdf`
 
+### 5. 🔍 OCR 文字识别
+
+从图片中提取文字，支持印刷体和手写体识别。
+
+- **图片识别**：支持 PNG / JPG / BMP / TIFF / WebP 等常见格式
+- **手写体模式**：专为手写文字优化的预处理管线（对比度增强 + 锐化 + 去噪）
+- **置信度标注**：识别结果以绿/黄/红色标注可信程度
+- **结果可复制**：一键复制全文到剪贴板，或导出为 TXT 文件
+- **拖放支持**：直接拖拽图片文件到窗口即可加载识别
+- 基于 **PaddleOCR 2.x + PaddlePaddle**，CUDA 可用时自动 GPU 加速
+
 ---
 
 ## 立即下载 Windows 安装包
@@ -91,7 +103,7 @@
 |------|------|------|
 | UI 框架 | PyQt6 | ≥ 6.6 |
 | PDF 解析 | PyMuPDF (fitz) | ≥ 1.24 |
-| OCR 识别 | EasyOCR + PyTorch | EasyOCR ≥ 1.7 / PyTorch CUDA 可选 |
+| OCR 识别 | PaddleOCR + PaddlePaddle | PaddleOCR ≥ 2.7 / PaddlePaddle CUDA 可选 |
 | PDF 生成 | ReportLab | ≥ 4.2 |
 | 图像处理 | Pillow | ≥ 10.0 |
 | 数据校验 | Pydantic | ≥ 2.0 |
@@ -121,7 +133,7 @@ run.bat
 
 下载 `公考小工具.exe`，双击运行（已包含所有依赖和资源）。
 
-> **注意**：OCR 功能需要 EasyOCR/PyTorch 运行环境；源码运行请先执行 `setup.bat`。首次启动 OCR 解析时会下载模型，安装 CUDA 版 PyTorch 后可使用 NVIDIA GPU 加速。
+> **注意**：OCR 功能需要 PaddleOCR/PaddlePaddle 运行环境；源码运行请先执行 `setup.bat`。首次启动 OCR 解析时会下载模型，安装 CUDA 版 PaddlePaddle 后可使用 NVIDIA GPU 加速。
 
 ---
 
@@ -134,10 +146,12 @@ CivilServantsTools/
 ├── version.json            # 版本与更新信息
 ├── ui/                     # 主窗口、首页路由、通知组件
 ├── tools/
+│   ├── ocr_engine/         # 共享 OCR 引擎（PaddleOCR 2.x）
 │   ├── pdf_converter/      # PDF 排版转换器
 │   ├── exam_timer/         # 考试计时器
 │   ├── answer_sheet/       # 答题卡生成器
-│   └── pdf_merger/         # PDF 文件拼合
+│   ├── pdf_merger/         # PDF 文件拼合
+│   └── ocr_recognizer/     # OCR 文字识别工具
 ├── resources/styles/       # 全局样式（Slate + Indigo 设计系统）
 ├── sample_input/           # 示例 PDF
 └── output/                 # 输出目录
@@ -154,9 +168,34 @@ CivilServantsTools/
 ## ⚠️ 已知限制
 
 - 目前仅支持 **Windows 10 / 11（64 位）** 平台，macOS / Linux 尚未适配
-- OCR 引擎（EasyOCR）首次使用需等待模型下载与加载（`注：安装时需要连接VPN下载，不然下载会超时失败。`），GPU 加速依赖 CUDA 版 PyTorch。
+- OCR 引擎（PaddleOCR）首次使用需等待模型下载与加载，GPU 加速依赖 CUDA 版 PaddlePaddle。
 - 排版转换对**非标准版式**的第三方 App 导出 PDF 可能存在兼容性问题，建议优先使用粉笔 App 导出的 PDF
-- 打包版 exe 体积较大（含 EasyOCR/PyTorch 运行库），约 140MB+
+- 打包版 exe 体积较大（含 PaddleOCR/PaddlePaddle 运行库），约 400MB+
+
+### 🖥️ RTX 50 系列（Blackwell）GPU 加速尚未支持
+
+由于 PaddlePaddle 版本适配滞后，**RTX 5070 / 5080 / 5090 等 Blackwell 架构显卡目前无法使用 GPU 加速**，OCR 自动回退为 CPU 模式运行。
+
+**技术原因：**
+
+| 组件 | 版本 | 最大支持的 GPU 架构 |
+|------|------|:--:|
+| PaddlePaddle | 2.6.2 | Ada Lovelace（RTX 40 系列，CC ≤ 8.9） |
+| PaddlePaddle | 3.x | Blackwell（RTX 50 系列，CC 12.0）|
+
+当前项目使用 **PaddlePaddle 2.6.2**，原因：
+- PaddlePaddle 3.x 的 **Windows GPU 包尚未发布**（国内 PyPI 镜像暂无可用 wheel）
+- PaddleOCR 3.x 在 Windows 上存在 **PIR/OneDNN 运行时兼容性 bug**（`ConvertPirAttribute2RuntimeAttribute` 崩溃）
+
+因此项目锁定在 2.6.2 版本，它编译时只支持到 RTX 40 系列的 Compute Capability 8.9。**RTX 5070 Ti 的 CC 12.0 超出范围**，程序启动时会检测到不兼容的 GPU 并自动回退 CPU。
+
+**影响：**
+- CPU 模式下 OCR 速度约为 GPU 的 1/3～1/5，但**识别精度完全不受影响**
+- 以 59 页 PDF 为例，CPU 模式约需 60 秒完成全文 OCR
+
+**未来解决路径：**
+- 等待 PaddlePaddle 官方 / 国内镜像发布 **3.x Windows GPU wheel**
+- 届时只需升级版本号并移除 GPU 架构检测限制，RTX 50 系列即可满血 GPU 加速
 
 ---
 

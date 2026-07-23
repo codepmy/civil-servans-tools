@@ -1,36 +1,36 @@
-"""OCR parser for scanned/image PDFs using EasyOCR.
+"""OCR parser for scanned/image PDFs using PaddleOCR.
 
-EasyOCR runs on PyTorch. If a CUDA-enabled PyTorch build is installed, OCR will
-use the NVIDIA GPU automatically; otherwise it falls back to CPU mode.
+PaddleOCR runs on PaddlePaddle. If a CUDA-enabled PaddlePaddle build is
+installed, OCR will use the NVIDIA GPU automatically; otherwise it falls
+back to CPU mode.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
 import re
-import shutil
-import subprocess
+from pathlib import Path
 from typing import Callable
 
 import fitz
 import numpy as np
 
+from tools.ocr_engine import PaddleRecognizer, OCRRegion
 from tools.pdf_converter.core.models import ParsedDocument, ParsedPage, TextBlock
 from tools.pdf_converter.core.parser.base import BaseParser
 
 
 class OCRParser(BaseParser):
-    """EasyOCR-based parser for scanned/image PDFs."""
+    """PaddleOCR-based parser for scanned/image PDFs."""
 
-    _MODEL_DIR = Path.home() / ".EasyOCR" / "model"
-
-    def __init__(self):
-        self._ocr = None
+    def __init__(self) -> None:
+        self._ocr: PaddleRecognizer | None = None
         self._device_label = "CPU"
         self._using_gpu = False
 
     @classmethod
     def is_first_time(cls) -> bool:
-        """Return whether the EasyOCR model cache appears empty."""
-        return not cls._MODEL_DIR.exists() or not any(cls._MODEL_DIR.iterdir())
+        """Return whether the PaddleOCR model cache appears empty."""
+        return PaddleRecognizer.is_first_time()
 
     @property
     def device_label(self) -> str:
@@ -40,71 +40,35 @@ class OCRParser(BaseParser):
     def using_gpu(self) -> bool:
         return self._using_gpu
 
-    def _get_ocr(self):
-        """Load EasyOCR lazily and prefer CUDA when it is truly available."""
-        if self._ocr is not None:
-            return self._ocr
-
+    @staticmethod
+    def _ensure_ocr_engine() -> PaddleRecognizer:
+        """Create a PaddleRecognizer, raising a user-friendly error on failure."""
         try:
-            import easyocr
-            import torch
+            return PaddleRecognizer()
         except ImportError as exc:
             raise RuntimeError(
-                "当前环境未安装 OCR 依赖（EasyOCR/PyTorch），请运行 setup.bat 安装。\n"
-                "如果需要 GPU 加速，请确认 setup.bat 最后的 cuda available 为 True。\n\n"
+                "当前环境未安装 OCR 依赖（PaddleOCR/PaddlePaddle），"
+                "请运行 setup.bat 安装。\n"
+                "如果需要 GPU 加速，请确认 setup.bat 末尾的 CUDA 检查通过。\n"
+                "\n"
                 f"原始错误: {exc}"
             ) from exc
 
-        if torch.cuda.is_available():
-            try:
-                device_name = torch.cuda.get_device_name(0)
-                self._ocr = easyocr.Reader(["ch_sim", "en"], gpu=True, verbose=False)
-                self._using_gpu = True
-                self._device_label = f"GPU: {device_name}"
-                return self._ocr
-            except Exception as exc:
-                self._log_gpu_fallback(exc, torch)
-        elif self._has_nvidia_gpu():
-            raise RuntimeError(
-                "检测到 NVIDIA 显卡，但当前 PyTorch 不是可用的 CUDA 版本，OCR 不会使用 GPU。\n"
-                "请重新运行 setup.bat；如果仍失败，请安装 Python 3.12 x64 后再运行 setup.bat。\n\n"
-                f"torch={getattr(torch, '__version__', 'unknown')}, "
-                f"cuda_build={torch.version.cuda}, cuda_available={torch.cuda.is_available()}"
-            )
+    def _get_ocr(self) -> PaddleRecognizer:
+        """Lazily load PaddleOCR and warm it up."""
+        if self._ocr is not None:
+            return self._ocr
 
-        self._ocr = easyocr.Reader(["ch_sim", "en"], gpu=False, verbose=False)
-        self._using_gpu = False
-        self._device_label = "CPU"
+        self._ocr = self._ensure_ocr_engine()
+        self._ocr.warm_up()
+
+        self._using_gpu = self._ocr.using_gpu
+        self._device_label = self._ocr.device_label
         return self._ocr
 
-    @staticmethod
-    def _has_nvidia_gpu() -> bool:
-        nvidia_smi = shutil.which("nvidia-smi")
-        if not nvidia_smi:
-            return False
-        try:
-            result = subprocess.run(
-                [nvidia_smi],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=3,
-                check=False,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-
-    @staticmethod
-    def _log_gpu_fallback(exc: Exception, torch_module) -> None:
-        import sys
-
-        cuda_build = getattr(getattr(torch_module, "version", None), "cuda", None)
-        print(
-            "[OCR] GPU 初始化失败，已自动回退 CPU。"
-            f" torch={getattr(torch_module, '__version__', 'unknown')},"
-            f" cuda_build={cuda_build}, error={exc}",
-            file=sys.stderr,
-        )
+    # ------------------------------------------------------------------
+    # BaseParser interface
+    # ------------------------------------------------------------------
 
     def can_handle(self, path: str) -> bool:
         return True
@@ -114,7 +78,7 @@ class OCRParser(BaseParser):
     ) -> ParsedDocument:
         doc = fitz.open(path)
         total = doc.page_count
-        pages = []
+        pages: list[ParsedPage] = []
 
         try:
             ocr = self._get_ocr()
@@ -124,7 +88,10 @@ class OCRParser(BaseParser):
 
             for i in range(total):
                 if progress:
-                    progress(int((i + 1) / total * 100), f"{mode} ... {i + 1}/{total}")
+                    progress(
+                        int((i + 1) / total * 100),
+                        f"{mode} ... {i + 1}/{total}",
+                    )
 
                 page = doc[i]
                 parsed_page = self._ocr_page(page, i, ocr)
@@ -137,14 +104,20 @@ class OCRParser(BaseParser):
             metadata={
                 "title": "",
                 "page_count": total,
-                "file_path": "",  # Avoid cleaner re-reading image-only PDFs as text.
+                "file_path": "",
                 "ocr_device": self._device_label,
                 "ocr_gpu": self._using_gpu,
             },
             source_type="image",
         )
 
-    def _ocr_page(self, page: fitz.Page, page_index: int, ocr) -> ParsedPage:
+    # ------------------------------------------------------------------
+    # Page-level OCR
+    # ------------------------------------------------------------------
+
+    def _ocr_page(
+        self, page: fitz.Page, page_index: int, ocr: PaddleRecognizer
+    ) -> ParsedPage:
         page_rect = page.rect
         width_mm = page_rect.width * 25.4 / 72
         height_mm = page_rect.height * 25.4 / 72
@@ -157,20 +130,20 @@ class OCRParser(BaseParser):
         if img.shape[2] == 4:
             img = img[:, :, :3]
 
-        results = ocr.readtext(img)
+        regions = ocr.recognize(img)
 
-        blocks = []
-        scale = 25.4 / dpi
-        for bbox, text, confidence in results:
-            if not self._should_keep_ocr_text(text, confidence):
+        blocks: list[TextBlock] = []
+        scale = 25.4 / dpi  # pixels → mm
+        for region in regions:
+            if not self._should_keep_ocr_text(region.text, region.confidence):
                 continue
 
-            x0 = min(p[0] for p in bbox) * scale
-            y0 = min(p[1] for p in bbox) * scale
-            x1 = max(p[0] for p in bbox) * scale
-            y1 = max(p[1] for p in bbox) * scale
+            x0 = region.bbox[0] * scale
+            y0 = region.bbox[1] * scale
+            x1 = region.bbox[2] * scale
+            y1 = region.bbox[3] * scale
 
-            stripped = text.strip()
+            stripped = region.text.strip()
             if stripped:
                 blocks.append(
                     TextBlock(
@@ -189,6 +162,10 @@ class OCRParser(BaseParser):
             height_mm=height_mm,
         )
 
+    # ------------------------------------------------------------------
+    # Quality filter
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _should_keep_ocr_text(text: str, confidence: float) -> bool:
         stripped = (text or "").strip()
@@ -199,4 +176,9 @@ class OCRParser(BaseParser):
         if confidence < 0.35:
             return False
         compact = re.sub(r"\s+", "", stripped)
-        return bool(re.fullmatch(r"\d{1,3}[\.\uff0e\u3002\u3001]?", compact) or re.fullmatch(r"[A-D][\.\uff0e\u3002_\-\u2014\u4e00\)\uff09]?", compact))
+        return bool(
+            re.fullmatch(r"\d{1,3}[\.．。、]?", compact)
+            or re.fullmatch(
+                r"[A-D][\.．。_\-—一\)）]?", compact
+            )
+        )
