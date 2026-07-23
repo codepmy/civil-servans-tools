@@ -42,9 +42,6 @@ class XingceCleaner:
         r"^(?:\u653f\u6cbb\u7406\u8bba|\u5e38\u8bc6\u5224\u65ad|\u8a00\u8bed\u7406\u89e3(?:\u4e0e\u8868\u8fbe)?|\u6570\u91cf\u5173\u7cfb|\u5224\u65ad\u63a8\u7406|\u8d44\u6599\u5206\u6790)\s*[\uff08\(]?\s*\u5171\s*\d+\s*\u9898\s*[\uff09\)]?$",
         r"^[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+\s*[\u3001\.\uff0e\u3002]\s*.+$",
         r"^\u6700\u6070\u5f53\u7684\u7b54\u6848",
-        r"^绗琝\s*.*閮ㄥ垎.*$",
-        r"^(?:鏀挎不鐞嗚.*|甯歌瘑鍒ゆ柇|瑷.*|鏁伴噺鍏崇郴|鍒ゆ柇鎺ㄧ悊|璧勬枡鍒嗘瀽).*$",
-        r"^鏈€鎭板綋鐨勭瓟妗.*",
     )
     DEFAULT_FILTER_PATTERNS = (
         r"^[\u203b\*]+\s*\u7b2c\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341]+\s*\u90e8\u5206\u7ed3\u675f.*$",
@@ -126,16 +123,41 @@ class XingceCleaner:
         if doc.source_type == "image":
             all_lines = self._normalize_scanned_lines(all_lines)
 
+        # Separate answer comparison tables from exam content.
+        # Uses density clustering of answer-grid lines so it is robust
+        # against OCR errors in section titles.
+        exam_lines, answer_groups = self._split_answer_sections(all_lines)
+
         if pdf_doc:
             pdf_doc.close()
 
-        questions = self._extract_questions(all_lines)
+        questions = self._extract_questions(exam_lines)
         self._annotate_question_ranges(questions)
         self._annotate_data_analysis_questions(questions)
-        for idx, q in enumerate(questions):
-            q.number = idx + 1
+        # Keep original question numbers from the PDF — each section
+        # (演练一, 实战演练二, ...) has its own independent numbering.
 
-        return CleanedDocument(exam_type="xingce", questions=questions, filtered_out=filtered_out)
+        # Map each answer cluster to the 1-based question count it
+        # follows (NOT the question number, which restarts per section).
+        # Using count avoids dict-key collisions when multiple sections
+        # have identically numbered questions (e.g. Q30 in each 演练).
+        answer_sections: list[tuple[int, list[str]]] = []
+        for pos, group in answer_groups:
+            if pos <= 0:
+                after_count = 0
+            else:
+                before_qs = self._extract_questions(list(exam_lines[:pos]))
+                after_count = len(before_qs)
+            text_lines = self._extract_answer_section_text(group)
+            if text_lines:
+                answer_sections.append((after_count, text_lines))
+
+        return CleanedDocument(
+            exam_type="xingce",
+            questions=questions,
+            filtered_out=filtered_out,
+            answer_sections=answer_sections,
+        )
 
     @staticmethod
     def _replace_blank_markers(text: str) -> str:
@@ -240,7 +262,7 @@ class XingceCleaner:
     @staticmethod
     def _is_data_analysis_heading(text: str) -> bool:
         compact = re.sub(r"\s+", "", text or "")
-        return DATA_ANALYSIS in compact or "璧勬枡鍒嗘瀽" in compact
+        return DATA_ANALYSIS in compact
 
     @staticmethod
     def _is_inside_visual_region(text: str, y_mm: float, x_mm: float, regions: list[tuple[float, float, float, float]]) -> bool:
@@ -319,7 +341,7 @@ class XingceCleaner:
 
     @classmethod
     def _normalize_scanned_lines(cls, lines: list[tuple]) -> list[tuple]:
-        """Repair common EasyOCR splits before question extraction.
+        """Repair common OCR splits before question extraction.
 
         Scanned PDFs often recognize left-margin question numbers as bare
         "2" instead of "2.", and option labels as standalone "C" with
@@ -580,6 +602,21 @@ class XingceCleaner:
             inline_options = self._split_inline_options(line)
             if inline_options and current_q:
                 for label, text in inline_options:
+                    # Guard: after A+B+C+D are collected, another "A"
+                    # starts a new question — prevents Q30 from absorbing
+                    # Q31-36's options when answer cluster removal leaves
+                    # no clear boundary between question groups.
+                    existing = {o.label for o in current_q.options}
+                    if len(existing) == 4 and label == "A":
+                        finish_current_question()
+                        inferred_num = (last_question_num or 0) + 1
+                        current_q = Question(
+                            number=inferred_num, stem="",
+                            source_page=current_page,
+                        )
+                        current_q.source_y_mm = y_mm
+                        stem_lines = []
+                        current_option = None
                     current_option = Option(label=label, text=text)
                     current_q.options.append(current_option)
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
@@ -608,6 +645,21 @@ class XingceCleaner:
                 current_q.source_y_mm = y_mm
                 stem_lines = [line]
                 current_option = None
+                last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
+                continue
+
+            # After a question group is finished (current_q is None due to
+            # finish_current_question having been called), section headings
+            # like "实战演练二" can appear between groups.  Catch them
+            # here instead of silently dropping them.
+            if current_q is None and not collecting_section and self._looks_like_material_start(line):
+                pending_sections.append(line)
+                pending_section_xs = [x_mm]
+                pending_section_ys = [y_mm]
+                pending_section_pages = [current_page]
+                pending_source_page = current_page
+                pending_source_y_mm = y_mm
+                collecting_section = True
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
                 continue
 
@@ -640,7 +692,20 @@ class XingceCleaner:
                         current_option.text, line, current_page, y_mm, x_mm, last_page, last_y_mm, last_x_mm
                     )
                 else:
-                    stem_lines.append(line)
+                    # If the question was just created (no real stem yet)
+                    # and the line looks like a section heading (e.g.
+                    # "实战演练一" after a synthetic "1."), promote it to
+                    # section_heading instead of appending to stem.
+                    # Only match genuine section-heading patterns
+                    # (演练/练习/强化/冲刺/真题/模拟), NOT generic text
+                    # like "根据…" or "下列…" which can start real stems.
+                    stem_so_far = "".join(stem_lines).strip()
+                    if (not stem_so_far
+                            and not current_q.options
+                            and self._looks_like_section_heading(line)):
+                        current_q.section_heading = line
+                    else:
+                        stem_lines.append(line)
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
 
         finish_current_question()
@@ -759,10 +824,13 @@ class XingceCleaner:
             return False
         if re.match(r"^\s*(?:\d+|[A-D])\s*[\.\uff0e\u3001\u3002\)\uff09]", line):
             return False
-        if current_option.text.rstrip().endswith(("，", "、", "；", "：", "（", "(", "-", "--")):
-            return False
+        # Section-start markers take priority over option-continuation
+        # punctuation checks.  Otherwise a heading like "实战演练二" on
+        # the next page is wrongly appended to the D option text.
         if XingceCleaner._looks_like_material_start(line):
             return True
+        if current_option.text.rstrip().endswith(("，", "、", "；", "：", "（", "(", "-", "--")):
+            return False
         if last_page == current_page and last_y_mm is not None and y_mm - last_y_mm < 9.0:
             return False
         if last_page != current_page:
@@ -779,6 +847,31 @@ class XingceCleaner:
         if compact.startswith((ACCORDING_TO, BELOW, MATERIAL, TABLE, FIGURE)):
             return True
         if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR), compact):
+            return True
+        # Section-like headings that appear between question groups
+        # (e.g. after an answer comparison table): 实战演练二, 模拟演练一
+        if re.match(
+            r"^(实战演练|模拟演练|强化练习|专项练习|真题演练|巩固练习|综合练习|冲刺练习)",
+            compact,
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _looks_like_section_heading(line: str) -> bool:
+        """Return True only for genuine section-heading patterns.
+
+        Unlike _looks_like_material_start this does NOT match generic
+        text starts like "根据…" or "下列…" — only the dedicated
+        section-heading prefixes used in exam PDFs (演练, 练习, etc.).
+        """
+        compact = re.sub(r"\s+", "", line or "")
+        if not compact:
+            return False
+        if re.match(
+            r"^(实战演练|模拟演练|强化练习|专项练习|真题演练|巩固练习|综合练习|冲刺练习)",
+            compact,
+        ):
             return True
         return False
 
@@ -801,7 +894,16 @@ class XingceCleaner:
         baseline = current_q.number if current_q is not None else last_question_num
         if baseline is None:
             return True
-        return baseline < q_num <= baseline + 3
+        # Normal increment within the same section
+        if baseline < q_num <= baseline + 3:
+            return True
+        # Section restart: numbering resets (e.g. 30 → 1 after an
+        # answer comparison table between 演练一 and 演练二).
+        # Only accepted when q_num is small and baseline is large
+        # enough to make a genuine restart plausible.
+        if q_num <= 10 and baseline > 10:
+            return True
+        return False
 
     @staticmethod
     def _annotate_question_ranges(questions: list[Question]) -> None:
@@ -821,7 +923,7 @@ class XingceCleaner:
         in_data_analysis = False
         for question in questions:
             heading = getattr(question, "section_heading", "") or ""
-            if DATA_ANALYSIS in re.sub(r"\s+", "", heading) or "璧勬枡鍒嗘瀽" in re.sub(r"\s+", "", heading):
+            if DATA_ANALYSIS in re.sub(r"\s+", "", heading):
                 in_data_analysis = True
             if in_data_analysis:
                 question.is_data_analysis = True
@@ -895,6 +997,152 @@ class XingceCleaner:
             if not found:
                 merged.append(region)
         return merged
+
+
+    @staticmethod
+    def _looks_like_answer_grid_line(text: str) -> bool:
+        """Return True if *text* looks like part of an answer comparison grid.
+
+        Typical answer grid rows:
+            1-5  ABCDA    6-10  BCDAB
+            1.【答案】A
+            1-5: A B C D A
+            ABCDA  BCDAB  CDABC  DABCD
+        """
+        compact = re.sub(r"\s+", "", text)
+        if not compact:
+            return False
+        # Number range header: "1-5", "11～20", etc.
+        if re.match(r"^\d{1,3}[-~～—]\d{1,3}", compact):
+            return True
+        # Individual answer: "1.A", "2.【答案】B", "11.C"
+        if re.match(r"^\d{1,3}[\.、．]?\s*[【】]?答案[【】]?\s*[A-D]$", compact):
+            return True
+        if re.match(r"^\d{1,3}[\.、．][A-D]$", compact):
+            return True
+        # Pure answer-letter sequence (3+ consecutive A-D letters): "ABCDA"
+        if re.match(r"^[A-D]{3,}$", compact):
+            return True
+        # Answer grid with mixed digits and letters (sparse format):
+        # "1A2B3C4D5A" or "1.A 2.B 3.C"
+        if re.match(r"^(\d{1,3}[\.、．]?\s*[A-D]\s*){3,}$", compact):
+            return True
+        return False
+
+    @classmethod
+    def _split_answer_sections(
+        cls, lines: list[tuple]
+    ) -> tuple[list[tuple], list[tuple[list[tuple]]]]:
+        """Split *lines* into ``(exam_lines, answer_section_groups)``
+        using answer-grid density clustering.
+
+        Returns:
+            exam_lines: All non-answer-content lines in original order.
+            answer_section_groups: List of answer clusters, each is a
+            list of ``(text, page, y_mm, x_mm)`` tuples representing one
+            answer comparison table.
+
+        Algorithm:
+        1. Mark each line as answer-grid-like or not.
+        2. Find clusters of 2+ consecutive grid lines.
+        3. For each cluster, include the 1 preceding short line
+           (potential header like "答案对照表").
+        4. Return clusters separately so callers can determine their
+           position relative to extracted questions.
+        """
+        n = len(lines)
+        if n == 0:
+            return [], []
+
+        # Mark answer-grid lines (skip SECTION_MARKERs)
+        is_grid = [False] * n
+        for i, item in enumerate(lines):
+            if item[0] != SECTION_MARKER:
+                is_grid[i] = cls._looks_like_answer_grid_line(
+                    str(item[0]).strip()
+                )
+
+        # Find clusters of 2+ consecutive grid lines
+        in_cluster = [False] * n
+        clusters: list[tuple[int, int]] = []  # (start, end) inclusive
+        i = 0
+        while i < n:
+            if is_grid[i]:
+                j = i
+                while j < n and is_grid[j]:
+                    j += 1
+                if j - i >= 2:
+                    # Expand backward: 1 short line (potential header).
+                    # Skip lines that look like section / material starts
+                    # (e.g. "实战演练二") — they are exam content, not
+                    # answer-table headers, and consuming them here would
+                    # drop the section heading from the rendered output.
+                    start = i
+                    if start > 0 and lines[start - 1][0] != SECTION_MARKER:
+                        prev_text = str(lines[start - 1][0]).strip()
+                        compact_prev = re.sub(r"\s+", "", prev_text)
+                        if len(compact_prev) <= 12 and not cls._looks_like_material_start(prev_text):
+                            start -= 1
+                    end = j  # exclusive
+                    clusters.append((start, end))
+                    for k in range(start, end):
+                        in_cluster[k] = True
+                i = j
+            else:
+                i += 1
+
+        # Build exam_lines (exclude cluster content)
+        exam_lines = [
+            item for idx, item in enumerate(lines) if not in_cluster[idx]
+        ]
+
+        # Build answer_section_groups, each tagged with its position in
+        # *exam_lines* — the number of non-cluster lines before it.
+        answer_section_groups: list[tuple[int, list[tuple]]] = []
+        for start, end in clusters:
+            group = list(lines[start:end])
+            if not group:
+                continue
+            # Position in exam_lines = count of non-cluster lines
+            # before the cluster start.
+            pos = sum(1 for k in range(start) if not in_cluster[k])
+            answer_section_groups.append((pos, group))
+
+        return exam_lines, answer_section_groups
+
+    @staticmethod
+    def _extract_answer_section_text(lines: list[tuple]) -> list[str]:
+        """Extract readable text from answer section lines.
+
+        Answer grid lines are sorted by their starting number so the
+        comparison table reads 1~5, 6~10, 11~15... in order.
+        """
+        headers: list[str] = []
+        grid_lines: list[str] = []
+
+        for item in lines:
+            marker_or_text = item[0]
+            if marker_or_text == SECTION_MARKER:
+                headers.append("")
+                headers.append(item[1])
+                continue
+            text = str(marker_or_text).strip()
+            if not text:
+                continue
+            if XingceCleaner._looks_like_answer_grid_line(text):
+                grid_lines.append(text)
+            else:
+                headers.append(text)
+
+        # Sort grid lines by the first number in each range
+        def _sort_key(text: str) -> int:
+            import re
+            m = re.match(r"^(\d{1,3})", text.replace(" ", ""))
+            return int(m.group(1)) if m else 0
+
+        grid_lines.sort(key=_sort_key)
+
+        return headers + grid_lines
 
 
 def detect_exam_type(doc: ParsedDocument) -> str:

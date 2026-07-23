@@ -51,7 +51,7 @@
 
 **文本型 PDF**（`TextParser`）：PyMuPDF 逐行提取 text spans，保留字体名、字号、加粗属性和毫米坐标。同时通过 image xref、drawings、visual region erasure 三种方式提取图片块。
 
-**扫描型 PDF**（`OCRParser`）：将页面渲染为 200 DPI 图片，EasyOCR 中文识别，CUDA 可用时通过 PyTorch 使用 NVIDIA GPU，置信度 ≥ 0.5 的文本保留。
+**扫描型 PDF**（`OCRParser`）：将页面渲染为 200 DPI 图片，PaddleOCR 中文识别，CUDA 可用时通过 PaddlePaddle 使用 NVIDIA GPU，置信度 ≥ 0.5 的文本保留。
 
 自动判断 PDF 类型：平均每页字符 > 20 为文本型，否则回退 OCR。
 

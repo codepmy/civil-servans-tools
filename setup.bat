@@ -18,8 +18,6 @@ pause
 exit /b %SETUP_EXIT%
 
 :main
-if not defined PYTORCH_CUDA_INDEX_URL set "PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128"
-
 echo ========================================
 echo   CivilServantsTools - Setup
 echo ========================================
@@ -48,7 +46,26 @@ if errorlevel 1 echo [WARN] Failed to set mirror. Continuing.
 echo OK.
 echo.
 
-echo [4/6] Installing base packages...
+echo [4/6] Checking for old OCR dependencies...
+set "HAS_EASYOCR=0"
+"%PYTHON_EXE%" %PYTHON_ARGS% -c "import easyocr" 2>nul
+if not errorlevel 1 set "HAS_EASYOCR=1"
+
+if "%HAS_EASYOCR%"=="1" (
+    echo Old EasyOCR/PyTorch installation detected. Uninstalling...
+    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip uninstall -y easyocr torch torchvision torchaudio 2>nul
+    echo Old dependencies removed.
+) else (
+    echo No old EasyOCR installation found. Skipping uninstall.
+)
+
+:: Also clean any PaddleOCR 3.x leftovers that conflict with 2.x.
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip uninstall -y paddlex paddlepaddle 2>nul
+echo OK.
+echo.
+
+echo [5/6] Installing base packages...
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%~dp0requirements.txt"
 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%~dp0requirements.txt"
 if errorlevel 1 (
     echo Retry with Aliyun mirror...
@@ -59,39 +76,44 @@ if errorlevel 1 (
 echo OK.
 echo.
 
-echo [5/6] Installing PyTorch for OCR...
+echo [6/6] Installing PaddleOCR 2.x and PaddlePaddle 2.x...
+
+:: Clean potentially corrupted model cache from previous installs.
+if exist "%USERPROFILE%\.paddleocr" (
+    echo Cleaning old PaddleOCR model cache...
+    rmdir /s /q "%USERPROFILE%\.paddleocr" 2>nul
+)
+
 set "HAS_NVIDIA=0"
 nvidia-smi >nul 2>&1
 if not errorlevel 1 set "HAS_NVIDIA=1"
 
-if "%HAS_NVIDIA%"=="1" (
-    echo NVIDIA GPU detected.
-    echo Installing CUDA-enabled PyTorch. CPU PyTorch will not be accepted.
-    echo PyTorch CUDA index: %PYTORCH_CUDA_INDEX_URL%
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip uninstall -y torch torchvision torchaudio
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install --no-cache-dir --force-reinstall torch torchvision --index-url %PYTORCH_CUDA_INDEX_URL% --trusted-host download.pytorch.org
-    if errorlevel 1 (
-        echo [ERROR] CUDA PyTorch install failed.
-        echo Fix suggestions:
-        echo   1. Confirm setup is using Python 3.12 x64 in the Python command above.
-        echo   2. Re-run setup.bat with VPN if download.pytorch.org is blocked.
-        echo   3. Keep PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128 for RTX 50 series.
-        exit /b 1
-    )
-    "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --cuda-required
-    if errorlevel 1 exit /b 1
-) else (
-    echo No NVIDIA GPU found. Installing CPU PyTorch.
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install --upgrade torch torchvision
-    if errorlevel 1 exit /b 1
-    "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --cuda
-)
-echo OK.
-echo.
+:: Uninstall packages that might have been compiled against numpy 2.x
+:: so PaddleOCR can pull compatible versions fresh.
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip uninstall -y scipy scikit-image 2>nul
 
-echo [6/6] Installing EasyOCR...
-"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install --upgrade "easyocr>=1.7.0,<2.0.0"
+set "PADDLE_PKG=paddlepaddle==2.6.2"
+if "%HAS_NVIDIA%"=="1" (
+    echo NVIDIA GPU detected — using GPU build.
+    set "PADDLE_PKG=paddlepaddle-gpu==2.6.2"
+) else (
+    echo No NVIDIA GPU found — using CPU build.
+)
+
+:: numpy<2.0 MUST be installed before PaddlePaddle because PaddlePaddle
+:: 2.6.2's C extensions are compiled against numpy 1.x ABI.
+echo Installing numpy 1.x + PaddlePaddle 2.6.2 + PaddleOCR 2.7.3...
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install "numpy>=1.26.0,<2.0.0"
 if errorlevel 1 exit /b 1
+
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install %PADDLE_PKG% paddleocr==2.7.3
+if errorlevel 1 (
+    echo [WARN] Install failed. Trying CPU PaddlePaddle as fallback...
+    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install paddlepaddle==2.6.2 paddleocr==2.7.3
+    if errorlevel 1 exit /b 1
+)
+
+echo Verifying PaddleOCR installation...
 "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --ocr
 if errorlevel 1 exit /b 1
 echo OK.
@@ -99,17 +121,17 @@ echo.
 
 echo Verifying OCR GPU status...
 if "%HAS_NVIDIA%"=="1" (
-    "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --cuda-required
+    "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --paddle-cuda-required
     if errorlevel 1 exit /b 1
 ) else (
-    "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --cuda
+    "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --paddle-cuda
 )
 echo.
 echo ========================================
 if "%HAS_NVIDIA%"=="1" (
-    echo   Setup complete. OCR GPU acceleration is ready.
+    echo   Setup complete. PaddleOCR GPU acceleration is ready.
 ) else (
-    echo   Setup complete. OCR will use CPU because no NVIDIA GPU was detected.
+    echo   Setup complete. PaddleOCR will use CPU because no NVIDIA GPU was detected.
 )
 echo ========================================
 exit /b 0

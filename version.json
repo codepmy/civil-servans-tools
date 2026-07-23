@@ -1,10 +1,10 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "authorName": "CodePmy",
   "authorEmail": "codepmy@163.com",
   "updateInfoUrl": "https://gitee.com/peisuer/civil-servans-tools/raw/master/version.json",
-  "releaseDate": "2026-07-18",
-  "changelog": "✨ 版本更新内容\n\n- **\uD83D\uDCC4 PDF内容格式转换**：增加批量处理功能、支持文件拖拽放入、修补部分场景bug、生成文件统一输出名称。\n\n- **\uD83D\uDCC4 申论答题纸生成**：生成文件统一输出名称。\n- \n- **\uD83D\uDCC4 PDF文件拼合**：拼合选中的PDF文件，支持选择拼合页数、拖动排序。",
+  "releaseDate": "2026-07-21",
+  "changelog": "✨ 版本更新内容\n\n- 🔍 新增 OCR文字识别工具：支持印刷体/手写体图片文字识别，复制或导出 TXT。\n\n- 🔄 OCR引擎全量升级：EasyOCR → PaddleOCR 3.x，中文识别更准确，手写体识别更强。\n\n- 🛠️ setup.bat 更新：自动卸载旧 OCR 依赖，安装 PaddlePaddle + PaddleOCR。",
   "downloadUrl": "https://wwanl.lanzoum.com/CivilServansTools",
   "mandatory": false
 }

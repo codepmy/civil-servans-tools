@@ -93,6 +93,8 @@ class CleanedDocument:
     shenlun_questions: list[ShenlunQuestion] = field(default_factory=list)
     filtered_out: list[str] = field(default_factory=list)  # 被过滤掉的内容
     ignored_pages: list[int] = field(default_factory=list)  # 整页跳过，如申论作答纸
+    answer_section_lines: list[str] = field(default_factory=list)  # 答案对照表文本（已废弃，用 answer_sections）
+    answer_sections: list = field(default_factory=list)  # [(after_question_number, [text_lines]), ...] 答案段落，按原位插入
 
 
 @dataclass

@@ -98,7 +98,7 @@ class ConversionPipeline:
 
     def _parse(self, path: str,
                progress: Callable[[int, str], None] = None) -> ParsedDocument:
-        """解析PDF文件 — 文字型走 PyMuPDF，扫描型走 EasyOCR。"""
+        """解析PDF文件 — 文字型走 PyMuPDF，扫描型走 PaddleOCR。"""
         pdf_type = TextParser.detect_pdf_type(path)
         if pdf_type == "image":
             try:
@@ -108,7 +108,7 @@ class ConversionPipeline:
 
             if OCRParser.is_first_time():
                 if progress:
-                    progress(5, "首次使用OCR，正在下载模型（约200MB）...")
+                    progress(5, "首次使用OCR，正在下载模型（约100MB）...")
             else:
                 if progress:
                     progress(5, "检测到扫描版PDF，加载OCR引擎...")
@@ -121,7 +121,7 @@ class ConversionPipeline:
             return parser.parse(path, progress)
         except RuntimeError as exc:
             error_text = str(exc)
-            if "当前环境未安装 OCR 依赖" in error_text or "当前 PyTorch 不是可用的 CUDA 版本" in error_text:
+            if "当前环境未安装 OCR 依赖" in error_text or "当前 PaddlePaddle 不是可用的 CUDA 版本" in error_text:
                 raise self._ocr_dependency_error(exc) from exc
             raise
 
@@ -129,8 +129,8 @@ class ConversionPipeline:
     def _ocr_dependency_error(exc: Exception) -> RuntimeError:
         return RuntimeError(
             "该PDF为扫描版/图片型，需要使用 OCR 引擎识别文字。\n"
-            "当前环境未安装 OCR 依赖（EasyOCR/PyTorch），请运行 setup.bat 安装。\n"
-            "安装完成后，setup.bat 末尾显示 cuda available: True 才表示 GPU 可用。\n\n"
+            "当前环境未安装 OCR 依赖（PaddleOCR/PaddlePaddle），请运行 setup.bat 安装。\n"
+            "安装完成后，setup.bat 末尾显示 GPU 可用: True 才表示 GPU 可用。\n\n"
             f"原始错误: {exc}"
         )
 
@@ -183,10 +183,11 @@ class ConversionPipeline:
         if question_count == 0:
             return True
 
-        # Xingce papers normally contain multiple choice questions densely across
-        # pages. If OCR yields fewer questions than pages on a multi-page scan,
-        # it is almost certainly dropping question numbers or merging columns.
-        if page_count >= 8 and question_count < page_count:
+        # Xingce papers normally contain multiple choice questions densely
+        # across pages.  For long-format sections (言语/资料分析) each page
+        # may hold only 1–2 questions, so we require at least ¼ of the page
+        # count before trusting the OCR for reflow.
+        if page_count >= 8 and question_count < max(5, page_count // 4):
             return True
 
         option_counts = [len(q.options) for q in cleaned.questions]

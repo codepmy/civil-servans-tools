@@ -142,8 +142,20 @@ class LayoutEngine:
             questions_by_page.setdefault(question.source_page, []).append(question)
         self._page_questions = questions_by_page
 
-        for question in doc.questions:
+        # Build lookup: 1-based question count → answer section text lines.
+        # question numbers restart per section (each 演练 starts at 1),
+        # so we use the running count (enumerate idx + 1) as the key.
+        answer_map: dict[int, list[str]] = {}
+        for after_count, text_lines in getattr(doc, "answer_sections", []) or []:
+            if text_lines:
+                answer_map[after_count] = text_lines
+
+        for q_idx, question in enumerate(doc.questions):
             self._layout_question(question)
+            # q_idx+1 is the 1-based count of questions rendered so far
+            after_lines = answer_map.get(q_idx + 1)
+            if after_lines:
+                self._layout_answer_section(after_lines)
 
         return LaidOutDocument(pages=self._pages, total_pages=len(self._pages), config_snapshot=self.config.__dict__)
 
@@ -1084,6 +1096,43 @@ class LayoutEngine:
         if cur:
             lines.append(cur)
         return lines or [text]
+
+    def _layout_answer_section(self, lines: list[str]):
+        """Render answer comparison tables at the end of the document.
+
+        Answer sections are detected by density clustering of grid lines
+        and rendered after all questions with a separator.
+        """
+        if not lines:
+            return
+
+        line_height = self._line_height(self.config.stem_size)
+        self._ensure_space(line_height * 2 + 4)
+        self._current_y += 4
+        separator = "─" * 40
+        self._add_text_line(
+            "material", separator, self.config.margin_left,
+            self.config.stem_font, self.config.stem_size, line_height,
+        )
+        self._ensure_space(line_height + 2)
+        self._current_y += 2
+
+        for text in lines:
+            normalized = self._normalize_text(text)
+            if not normalized:
+                self._ensure_space(line_height * 0.6)
+                self._current_y += line_height * 0.6
+                continue
+            for line in self._break_lines(
+                normalized, self.content_width,
+                self.config.stem_font, self.config.stem_size,
+            ):
+                self._add_text_line(
+                    "material", line, self.config.margin_left,
+                    self.config.stem_font, self.config.stem_size, line_height,
+                )
+        self._ensure_space(line_height + 2)
+        self._current_y += 2
 
     def finish(self):
         if self._current_page and self._current_page.elements:

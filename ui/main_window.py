@@ -42,6 +42,7 @@ from tools.answer_sheet.core.generator import AnswerSheetGenerator
 from tools.answer_sheet.ui.widget import AnswerSheetWidget
 from tools.exam_timer.ui.timer_widget import TimerWidget
 from tools.pdf_merger.ui.widget import PdfMergerWidget
+from tools.ocr_recognizer.ui.recognizer_widget import OCRRecognizerWidget
 
 
 DEFAULT_APP_METADATA = {
@@ -193,11 +194,13 @@ class MainWindow(QMainWindow):
             AnswerSheetGenerator(self._font_manager),
         )
         self.pdf_merger_page = PdfMergerWidget()
+        self.ocr_recognizer_page = OCRRecognizerWidget()
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.pdf_tool_page)
         self.stack.addWidget(self.timer_tool_page)
         self.stack.addWidget(self.answer_sheet_page)
         self.stack.addWidget(self.pdf_merger_page)
+        self.stack.addWidget(self.ocr_recognizer_page)
         self.setCentralWidget(self.stack)
 
         self.status_bar = QStatusBar()
@@ -308,6 +311,9 @@ class MainWindow(QMainWindow):
             ("📎", "PDF文件拼合",
              "多份 PDF 按序合并，拖拽排序，一键生成",
              self._show_pdf_merger),
+            ("🔍", "OCR文字识别",
+             "图片文字提取，支持印刷体/手写体，复制或导出 TXT",
+             self._show_ocr_recognizer),
         ]
 
         active_grid = QGridLayout()
@@ -329,7 +335,7 @@ class MainWindow(QMainWindow):
 
         pending_row = QHBoxLayout()
         pending_row.setSpacing(12)
-        for name in ["🔧 待开发", "📖 待开发", "🎯 待开发", "💡 待开发", "⚡ 待开发"]:
+        for name in ["🔧 待开发", "📖 待开发", "🎯 待开发", "💡 待开发"]:
             chip = QPushButton(name)
             chip.setObjectName("tool-card-pending")
             chip.setEnabled(False)
@@ -441,6 +447,11 @@ class MainWindow(QMainWindow):
         self.toolbar.hide()
         self.status_bar.showMessage("PDF文件拼合 - 添加PDF文件并按顺序拼合")
 
+    def _show_ocr_recognizer(self):
+        self.stack.setCurrentWidget(self.ocr_recognizer_page)
+        self.toolbar.hide()
+        self.status_bar.showMessage("OCR文字识别 - 打开图片开始识别")
+
     def _connect_signals(self):
         self.toolbar.home_clicked.connect(self._show_home)
         self.toolbar.open_clicked.connect(self._on_open)
@@ -454,6 +465,8 @@ class MainWindow(QMainWindow):
         self.answer_sheet_page.status_message.connect(self._show_answer_sheet_status)
         self.pdf_merger_page.back_requested.connect(self._show_home)
         self.pdf_merger_page.status_message.connect(self._show_merger_status)
+        self.ocr_recognizer_page.back_requested.connect(self._show_home)
+        self.ocr_recognizer_page.status_message.connect(self._show_ocr_status)
 
     def _on_batch(self):
         dialog = BatchDialog(self._fonts, self)
@@ -465,6 +478,10 @@ class MainWindow(QMainWindow):
 
     def _show_merger_status(self, message: str):
         if self.stack.currentWidget() == self.pdf_merger_page:
+            self.status_bar.showMessage(message)
+
+    def _show_ocr_status(self, message: str):
+        if self.stack.currentWidget() == self.ocr_recognizer_page:
             self.status_bar.showMessage(message)
 
     def _open_author_email(self, _link: str = ""):
@@ -572,6 +589,11 @@ class MainWindow(QMainWindow):
             self._show_ocr_install_dialog(error_msg)
             return
 
+        # 检测是否缺少 cuDNN 运行时
+        if "CUDNN_MISSING" in error_msg:
+            self._show_cudnn_dialog(error_msg)
+            return
+
         QMessageBox.critical(
             self,
             "转换失败",
@@ -627,6 +649,21 @@ class MainWindow(QMainWindow):
             )
         except Exception as exc:
             QMessageBox.warning(self, "启动安装失败", str(exc))
+
+    def _show_cudnn_dialog(self, error_msg: str):
+        """弹出 cuDNN 下载对话框（带跳转按钮）。"""
+        CUDNN_URL = "https://developer.nvidia.com/rdp/cudnn-archive"
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("缺少 cuDNN 运行时")
+        msg.setText(error_msg.replace("CUDNN_MISSING\n", ""))
+        download_btn = msg.addButton("打开 cuDNN 下载页面", QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(download_btn)
+        msg.exec()
+        if msg.clickedButton() == download_btn:
+            QDesktopServices.openUrl(QUrl(CUDNN_URL))
+        self.status_bar.showMessage("请安装 cuDNN 8.x 后重试")
 
     def _on_worker_finished(self):
         if self._worker:
@@ -884,6 +921,6 @@ class MainWindow(QMainWindow):
             "<p>面向公务员考试的小工具集合。</p>"
             f"<p><b>开发人:</b> {AUTHOR_NAME}<br>"
             f"<b>邮箱:</b> <a href=\"mailto:{AUTHOR_EMAIL}\">{AUTHOR_EMAIL}</a></p>"
-            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器、申论答题纸生成器、PDF文件拼合</p>"
-            "<p><b>Python + PyQt6 + PyMuPDF + ReportLab</b></p>",
+            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器、申论答题纸生成器、PDF文件拼合、OCR文字识别</p>"
+            "<p><b>Python + PyQt6 + PyMuPDF + ReportLab + PaddleOCR</b></p>",
         )
