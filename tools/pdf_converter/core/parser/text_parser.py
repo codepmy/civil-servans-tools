@@ -133,9 +133,22 @@ class TextParser(BaseParser):
         return len(stripped) >= 12
 
     def _extract_visual_blocks(self, page: fitz.Page, page_rect: fitz.Rect,
-                               page_index: int) -> list[ImageBlock]:
+                               page_index: int, skip_cover: bool = True) -> list[ImageBlock]:
+        # First page of 粉笔/华图/中公 PDFs is always a cover with
+        # branding, QR codes and ads — no exam content worth keeping.
+        # skip_cover=False allows OCR parsers to extract images from
+        # scanned PDF page 1 which is actual exam content.
+        if skip_cover and page_index == 0:
+            return []
         rects: list[fitz.Rect] = []
         page_area = page_rect.get_area()
+        # Images entirely inside the header or footer band (e.g. banner
+        # logos, watermarks) must be dropped BEFORE rect merging.  If
+        # they are kept they can merge with legitimate content images
+        # (charts, tables) and produce an oversized merged rect that
+        # later gets rejected by the 45 % page-area guard, which forces
+        # a fallback to the erasing method and clips chart labels.
+        footer_start_pt = min(FOOTER_START_PT, page_rect.height - 34)
         try:
             seen = set()
             for img_info in page.get_images(full=True):
@@ -144,6 +157,8 @@ class TextParser(BaseParser):
                     continue
                 seen.add(xref)
                 for rect in page.get_image_rects(xref):
+                    if rect.y1 <= HEADER_CUTOFF_PT or rect.y0 >= footer_start_pt:
+                        continue
                     self._append_reasonable_rect(rects, rect, page_rect, page_area)
         except Exception:
             pass
@@ -151,7 +166,10 @@ class TextParser(BaseParser):
         try:
             for block in page.get_text("dict").get("blocks", []):
                 if block.get("type") == 1 and "bbox" in block:
-                    self._append_reasonable_rect(rects, fitz.Rect(block["bbox"]), page_rect, page_area)
+                    r = fitz.Rect(block["bbox"])
+                    if r.y1 <= HEADER_CUTOFF_PT or r.y0 >= footer_start_pt:
+                        continue
+                    self._append_reasonable_rect(rects, r, page_rect, page_area)
         except Exception:
             pass
 
@@ -195,7 +213,7 @@ class TextParser(BaseParser):
                 continue
             if rect.width > page_rect.width * 0.92 and rect.height > page_rect.height * 0.65:
                 continue
-            if rect.get_area() > page_area * 0.45:
+            if rect.get_area() > page_area * 0.55:
                 continue
             if rect.width < 24 or rect.height < 8 or rect.get_area() < 350:
                 continue

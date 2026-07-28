@@ -101,10 +101,13 @@ class ConversionPipeline:
         """解析PDF文件 — 文字型走 PyMuPDF，扫描型走 PaddleOCR。"""
         pdf_type = TextParser.detect_pdf_type(path)
         if pdf_type == "image":
-            try:
-                from tools.pdf_converter.core.parser.ocr_parser import OCRParser
-            except (ImportError, RuntimeError) as exc:
-                raise self._ocr_dependency_error(exc) from exc
+            # 预检 OCR 环境是否可用
+            from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
+            ok, reason = PaddleRecognizer.is_available()
+            if not ok:
+                raise RuntimeError(reason)
+
+            from tools.pdf_converter.core.parser.ocr_parser import OCRParser
 
             if OCRParser.is_first_time():
                 if progress:
@@ -122,17 +125,11 @@ class ConversionPipeline:
         except RuntimeError as exc:
             error_text = str(exc)
             if "当前环境未安装 OCR 依赖" in error_text or "当前 PaddlePaddle 不是可用的 CUDA 版本" in error_text:
-                raise self._ocr_dependency_error(exc) from exc
+                raise RuntimeError(
+                    "该PDF为扫描版/图片型，需要使用 OCR 引擎识别文字。\n"
+                    + error_text
+                ) from exc
             raise
-
-    @staticmethod
-    def _ocr_dependency_error(exc: Exception) -> RuntimeError:
-        return RuntimeError(
-            "该PDF为扫描版/图片型，需要使用 OCR 引擎识别文字。\n"
-            "当前环境未安装 OCR 依赖（PaddleOCR/PaddlePaddle），请运行 setup.bat 安装。\n"
-            "安装完成后，setup.bat 末尾显示 GPU 可用: True 才表示 GPU 可用。\n\n"
-            f"原始错误: {exc}"
-        )
 
     def _clean(self, doc: ParsedDocument, exam_type: str,
                progress: Callable[[int, str], None] = None) -> CleanedDocument:
@@ -193,8 +190,24 @@ class ConversionPipeline:
         option_counts = [len(q.options) for q in cleaned.questions]
         abnormal_options = sum(1 for count in option_counts if count < 3 or count > 5)
         abnormal_ratio = abnormal_options / max(1, question_count)
-        if question_count >= 8 and abnormal_ratio >= 0.45:
+        # Lowered from 0.45 — even 25% abnormal options indicates poor OCR
+        if question_count >= 8 and abnormal_ratio >= 0.25:
             return True
+
+        # Option-label imbalance check: when OCR merges or drops option lines,
+        # A/B/C/D counts become skewed (e.g. A=121, D=105 for 99 questions).
+        # Compute the range of option-label frequencies — a spread > 15% of
+        # the expected count signals unreliable option extraction.
+        label_counts: dict[str, int] = {}
+        for q in cleaned.questions:
+            for opt in q.options:
+                label_counts[opt.label] = label_counts.get(opt.label, 0) + 1
+        if label_counts and len(label_counts) >= 2:
+            freq_values = list(label_counts.values())
+            freq_range = max(freq_values) - min(freq_values)
+            expected = question_count  # perfect: each label appears question_count times
+            if expected > 0 and freq_range / max(1, expected) >= 0.12:
+                return True
 
         empty_ocr_pages = sum(1 for page in parsed.pages if not page.blocks)
         if page_count >= 5 and empty_ocr_pages / page_count >= 0.2 and question_count < page_count * 1.5:

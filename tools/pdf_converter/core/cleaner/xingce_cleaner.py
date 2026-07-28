@@ -64,23 +64,35 @@ class XingceCleaner:
             import fitz
             pdf_doc = fitz.open(doc.metadata.get("file_path", ""))
 
+        # ── First pass: collect all page lines for header detection ──
+        all_page_lines: list[list[tuple]] = []
+        for i, page in enumerate(doc.pages):
+            if pdf_doc and i < pdf_doc.page_count:
+                page_lines = self._extract_positioned_lines(pdf_doc[i])
+            else:
+                sorted_blocks = sorted(page.blocks, key=lambda b: (round(b.bbox[1], 1), b.bbox[0]))
+                page_lines = [(b.text, b.bbox[1], b.bbox[0]) for b in sorted_blocks]
+            all_page_lines.append(page_lines)
+
+        # Detect text that repeats across 3+ pages (likely headers)
+        repeated_texts = self._detect_repeated_headers(all_page_lines)
+
+        # ── Second pass: filter and process ──
         all_lines: list[tuple] = []
         in_data_analysis = False
         for i, page in enumerate(doc.pages):
             if progress:
                 progress(int((i + 1) / len(doc.pages) * 100), "清洗中")
 
-            if pdf_doc and i < pdf_doc.page_count:
-                page_lines = self._extract_positioned_lines(pdf_doc[i])
-            else:
-                sorted_blocks = sorted(page.blocks, key=lambda b: (round(b.bbox[1], 1), b.bbox[0]))
-                page_lines = [(b.text, b.bbox[1], b.bbox[0]) for b in sorted_blocks]
-
+            page_lines = all_page_lines[i]
             for item in page_lines:
                 line, y_mm = item[0], item[1]
                 x_mm = item[2] if len(item) > 2 else 0.0
                 stripped = line.strip()
                 if not stripped:
+                    continue
+                if stripped in repeated_texts:
+                    filtered_out.append(f"[repeated-header] {stripped[:50]}")
                     continue
                 if self._is_filtered_line(stripped):
                     filtered_out.append(f"[configured-filter] {stripped[:50]}")
@@ -93,13 +105,13 @@ class XingceCleaner:
                     and x_mm <= 38.0
                     and HEADER_CUTOFF_MM <= y_mm <= min(FOOTER_START_MM, page.height_mm - 12)
                 )
-                if in_data_analysis and self._is_inside_visual_region(
+                is_section_instruction = self._is_section_instruction(stripped)
+
+                if in_data_analysis and not is_section_instruction and self._is_inside_visual_region(
                     stripped, y_mm, x_mm, visual_regions_by_page.get(page.page_number, [])
                 ):
                     filtered_out.append(f"[data-analysis-visual-text] {stripped[:50]}")
                     continue
-
-                is_section_instruction = self._is_section_instruction(stripped)
                 if y_mm < HEADER_CUTOFF_MM or y_mm > min(FOOTER_START_MM, page.height_mm - 12):
                     is_content_line = (
                         self._is_content_line_near_header(stripped, y_mm)
@@ -283,7 +295,7 @@ class XingceCleaner:
         """Check if text inside a visual region is meaningful content that should be preserved.
 
         Only structural markers (table/figure captions, notes, year-marked text)
-        and longer text (>=15 chars) are preserved. Short labels, numbers, and
+        and longer text (>=12 chars) are preserved. Short labels, numbers, and
         table cell data inside visual regions are treated as chart noise and
         filtered out.
         """
@@ -296,14 +308,19 @@ class XingceCleaner:
         # Note text (e.g. "\u6ce8\uff1a...")
         if compact.startswith(NOTE_CHAR):
             return True
-        # Year-marked text with substantial content after the year
-        # (e.g. "2024\u5e74\u4e2d\u5173\u6751...").  Bare year labels like "2022\u5e74" that
-        # serve as table column headers are excluded.
-        if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR) + r".{3,}", compact):
+        # Year-marked text: "2024\u5e74" alone or with following content.
+        # Lowered threshold from .{3,} to .{1,} so chart axis labels like
+        # "2024\u5e74Q1" are preserved.
+        if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR) + r".{1,}", compact):
             return True
-        # Text >= 20 chars total \u2014 long enough to be a real material sentence,
-        # not a table-row label (which rarely exceeds 18 chars).
-        if len(compact) >= 20:
+        # High-value short text: chart annotations containing percentage signs,
+        # unit labels (\u4ebf/\u4e07/\u5143/\u5428/\u4eba), or multiplier markers.
+        # These are meaningful chart labels, not noise.
+        if len(compact) >= 4 and re.search(r"[%\uff05\u4ebf\u4e07\u500d\u5143\u5428\u4eba]", compact):
+            return True
+        # Text >= 12 chars total \u2014 long enough to be a meaningful annotation,
+        # not a bare table-cell value (which rarely exceeds 11 chars).
+        if len(compact) >= 12:
             return True
         return False
 
@@ -346,9 +363,68 @@ class XingceCleaner:
         Scanned PDFs often recognize left-margin question numbers as bare
         "2" instead of "2.", and option labels as standalone "C" with
         the option body in a nearby block on the same visual row.
+
+        Also splits lines where OCR merged a question number into the
+        middle of text, e.g. "...低于集体利益93.有甲、乙..."
         """
+        # ── Pre-pass: split lines containing inline question numbers ──
+        # OCR often fails to break lines at question boundaries, producing
+        # "...text91.text92.text93..." on a single line.  Find numbers 1-200
+        # preceded by CJK (not digits) and followed by CJK (not digits, to
+        # avoid matching decimal values like "1568.40万"), then split.
+        _inline_qnum = re.compile(
+            r"[一-鿿\s](\d{1,3})[\.．、。][一-鿿]"
+        )
+        preprocessed: list[tuple] = []
+        for item in lines:
+            if item[0] == SECTION_MARKER:
+                preprocessed.append(item)
+                continue
+            text = str(item[0]).strip()
+            if not text:
+                preprocessed.append(item)
+                continue
+            page = item[1]
+            y_mm = item[2] if len(item) > 2 else 0.0
+            x_mm = item[3] if len(item) > 3 else 0.0
+
+            # Already starts with a question number — check for additional
+            # inline question numbers later in the same line
+            starts_with_qnum = bool(cls.QUESTION_NUM_RE.match(text))
+            # Find all inline question-number positions
+            q_positions: list[int] = []
+            for m in _inline_qnum.finditer(text):
+                q_num = int(m.group(1))
+                if 1 <= q_num <= 200:
+                    q_positions.append(m.start(1))  # position of the number
+            if len(q_positions) <= 1:
+                preprocessed.append(item)
+                continue
+
+            # Split at each question-number position
+            prev = 0
+            first_pos = None
+            for pos in q_positions:
+                if first_pos is None:
+                    # Prefix before the first inline question number
+                    prefix = text[0:pos].strip()
+                    if prefix:
+                        preprocessed.append((prefix, page, y_mm, x_mm))
+                    first_pos = pos
+                    prev = pos
+                else:
+                    segment = text[prev:pos].strip()
+                    if segment:
+                        preprocessed.append((segment, page, y_mm, x_mm))
+                    prev = pos
+            # Final segment after the last question number
+            tail = text[prev:].strip()
+            if tail:
+                preprocessed.append((tail, page, y_mm, x_mm))
+
+        sorted_lines = preprocessed
         normalized: list[tuple] = []
-        sorted_lines = lines
+        sorted_lines = sorted_lines  # keep the name consistent below
         first_content = cls._first_scanned_content_line(sorted_lines)
         first_marker = cls._first_scanned_question_marker(sorted_lines)
         if cls._needs_synthetic_first_question(first_content, first_marker):
@@ -564,6 +640,15 @@ class XingceCleaner:
             x_mm = item[3] if len(item) > 3 else 0.0
 
             q_match = self.QUESTION_NUM_RE.match(line)
+            if q_match:
+                q_num = int(q_match.group(1))
+                # Guard: "8.7%" / "3.14" are decimals/percentages, not question
+                # numbers.  Only applies to 1-digit numbers followed immediately
+                # by another digit.  Does NOT affect "64.2024年" (64 > 9) or
+                # "8. 下列..." (the next char is not a digit).
+                after_sep = line[q_match.end():].lstrip()
+                if q_num <= 9 and after_sep and after_sep[0].isdigit():
+                    q_match = None
             if q_match and self._is_next_question_number(q_match, current_q, last_question_num):
                 finish_current_question()
                 q_num = int(q_match.group(1))
@@ -590,6 +675,40 @@ class XingceCleaner:
                 collecting_section = False
                 last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
                 continue
+
+            elif q_match:
+                # Regex matched but _is_next_question_number rejected the full
+                # number.  This can happen with merged text like "1464．2024年"
+                # where "1464" is too large.  Try to find an embedded valid
+                # number in its suffix (e.g. "64").
+                embedded = self._detect_merged_question_number(
+                    q_match, current_q, last_question_num
+                )
+                if embedded:
+                    finish_current_question()
+                    q_num, stem_start = embedded
+                    stem_lines = [line[stem_start:].strip()] if line[stem_start:].strip() else []
+                    current_option = None
+                    current_q = Question(number=q_num, stem="", source_page=current_page)
+                    current_q.source_y_mm = y_mm
+                    if pending_sections:
+                        current_q.section_heading = "\n".join(pending_sections)
+                        current_q.section_line_xs = list(pending_section_xs)
+                        current_q.section_line_ys = list(pending_section_ys)
+                        current_q.section_line_pages = list(pending_section_pages)
+                        current_q.section_source_page = pending_source_page or current_page
+                        current_q.section_source_y_mm = pending_source_y_mm if pending_source_y_mm is not None else y_mm
+                        current_q.section_end_page = current_page
+                        current_q.section_end_y_mm = y_mm
+                        pending_sections = []
+                        pending_section_xs = []
+                        pending_section_ys = []
+                        pending_section_pages = []
+                        pending_source_page = None
+                        pending_source_y_mm = None
+                    collecting_section = False
+                    last_page, last_y_mm, last_x_mm = current_page, y_mm, x_mm
+                    continue
 
             if collecting_section:
                 pending_sections.append(line)
@@ -886,6 +1005,44 @@ class XingceCleaner:
             return False
         return True
 
+    @classmethod
+    def _detect_merged_question_number(
+        cls, match: re.Match, current_q: Question | None,
+        last_question_num: int | None,
+    ) -> tuple[int, int] | None:
+        """Detect a real question number embedded in merged text.
+
+        When PyMuPDF merges consecutive PDF lines ("B. 14" + "64．2024年"
+        -> "1464．2024年"), the regex matches "1464" which is too large
+        for _is_next_question_number.  This method checks if a suffix of
+        the matched digits is a valid question number.
+
+        Only activates for numbers > 200 — smaller numbers are handled
+        by the normal question-creation path.
+
+        Returns (question_number, stem_start_position) or None.
+        """
+        full_num = int(match.group(1))
+        if full_num <= 200:
+            return None
+        num_str = match.group(1)
+        stem_start = match.end()
+        baseline = current_q.number if current_q is not None else last_question_num
+        # Try suffixes from longest to shortest; return first valid one.
+        # Section restart is NOT allowed for embedded numbers.
+        for trim in range(1, len(num_str)):
+            try:
+                sub_num = int(num_str[trim:])
+            except ValueError:
+                continue
+            if not (1 <= sub_num <= 200):
+                continue
+            if baseline is None:
+                return (sub_num, stem_start)
+            if baseline < sub_num <= baseline + 3:
+                return (sub_num, stem_start)
+        return None
+
     @staticmethod
     def _is_next_question_number(match: re.Match, current_q: Question | None, last_question_num: int | None = None) -> bool:
         q_num = int(match.group(1))
@@ -899,9 +1056,10 @@ class XingceCleaner:
             return True
         # Section restart: numbering resets (e.g. 30 → 1 after an
         # answer comparison table between 演练一 and 演练二).
-        # Only accepted when q_num is small and baseline is large
-        # enough to make a genuine restart plausible.
-        if q_num <= 10 and baseline > 10:
+        # Only accepted when q_num is very small (1-5) and baseline is
+        # large enough (>=10) to make a genuine restart plausible.
+        # Prevents false positives like "8.7%" being treated as Q8 after Q125.
+        if q_num <= 5 and baseline >= 10:
             return True
         return False
 
@@ -1143,6 +1301,44 @@ class XingceCleaner:
         grid_lines.sort(key=_sort_key)
 
         return headers + grid_lines
+
+
+    @staticmethod
+    def _detect_repeated_headers(all_page_lines: list[list[tuple]]) -> set[str]:
+        """Detect text repeated across 3+ pages — likely page headers/watermarks.
+
+        Exam content (question numbers, option labels, section markers) is
+        excluded from the check.  Only lines with >= 12 non-whitespace
+        CJK chars are considered — short numeric/generic lines would produce
+        too many false positives.
+        """
+        from collections import defaultdict
+        text_pages: dict[str, set[int]] = defaultdict(set)
+        for page_idx, page_lines in enumerate(all_page_lines):
+            seen_this_page: set[str] = set()
+            for item in page_lines:
+                text = str(item[0]).strip()
+                if not text or len(text) < 6:
+                    continue
+                # Exclude structured exam content
+                if XingceCleaner.QUESTION_NUM_RE.match(text):
+                    continue
+                if XingceCleaner.OPTION_RE.match(text):
+                    continue
+                if XingceCleaner.SECTION_RE.match(text):
+                    continue
+                if XingceCleaner._is_page_number(text):
+                    continue
+                compact = re.sub(r"\s+", "", text)
+                # Must have substantial CJK content to qualify as a header candidate
+                cjk_chars = len(re.findall(r"[一-鿿]", compact))
+                if cjk_chars < 8:
+                    continue
+                if text in seen_this_page:
+                    continue
+                seen_this_page.add(text)
+                text_pages[text].add(page_idx)
+        return {text for text, pages in text_pages.items() if len(pages) >= 3}
 
 
 def detect_exam_type(doc: ParsedDocument) -> str:

@@ -170,7 +170,7 @@ CivilServantsTools/
 - 目前仅支持 **Windows 10 / 11（64 位）** 平台，macOS / Linux 尚未适配
 - OCR 引擎（PaddleOCR）首次使用需等待模型下载与加载，GPU 加速依赖 CUDA 版 PaddlePaddle。
 - 排版转换对**非标准版式**的第三方 App 导出 PDF 可能存在兼容性问题，建议优先使用粉笔 App 导出的 PDF
-- 打包版 exe 体积较大（含 PaddleOCR/PaddlePaddle 运行库），约 400MB+
+- 打包版 exe 体积较大（含 PaddleOCR/PaddlePaddle 运行库），约 600MB+
 
 ### 🖥️ RTX 50 系列（Blackwell）GPU 加速尚未支持
 
@@ -187,7 +187,7 @@ CivilServantsTools/
 - PaddlePaddle 3.x 的 **Windows GPU 包尚未发布**（国内 PyPI 镜像暂无可用 wheel）
 - PaddleOCR 3.x 在 Windows 上存在 **PIR/OneDNN 运行时兼容性 bug**（`ConvertPirAttribute2RuntimeAttribute` 崩溃）
 
-因此项目锁定在 2.6.2 版本，它编译时只支持到 RTX 40 系列的 Compute Capability 8.9。**RTX 5070 Ti 的 CC 12.0 超出范围**，程序启动时会检测到不兼容的 GPU 并自动回退 CPU。
+因此项目锁定在 2.6.2 版本，它编译时只支持到 RTX 40 系列的 Compute Capability 8.9。**RTX 50 的 CC 12.0 超出范围**，程序启动时会检测到不兼容的 GPU 并自动回退 CPU。
 
 **影响：**
 - CPU 模式下 OCR 速度约为 GPU 的 1/3～1/5，但**识别精度完全不受影响**

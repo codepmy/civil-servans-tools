@@ -224,7 +224,7 @@ class LayoutEngine:
                     self._add_image(img)
 
         q_label = f"{question.number}{self.config.question_suffix}"
-        stem_segments = self._stem_segments(question.stem)
+        stem_segments = self._stem_segments(question.stem, section_heading=getattr(question, "section_heading", ""))
         stem_text = stem_segments[0] if stem_segments else ""
 
         prefix_w_mm = self._text_width_mm(q_label, self.config.stem_font, self.config.stem_size)
@@ -252,7 +252,11 @@ class LayoutEngine:
         #      need per-question images placed between stem and option labels.
         is_da = getattr(question, "is_data_analysis", False)
         is_last = getattr(question, "source_end_page", None) is None
-        _CHART_PLACEHOLDERS = frozenset({"如图所示", "如下图", "见上图", ""})
+        _CHART_PLACEHOLDERS = frozenset({
+            "如图所示", "如下图", "见上图", "见下图",
+            "如右图", "如左图", "如上图", "如上图所示",
+            "见图", "见图表", "",
+        })
         has_chart_opts = (
             is_da
             and len(question.options) >= 4
@@ -291,26 +295,25 @@ class LayoutEngine:
                 and not (img.width_mm > page_w * 0.95 and img.height_mm > page_h * 0.95)
                 and not (img.height_mm < 15 and img.width_mm > img.height_mm * 5)
             ]
-        elif not is_da or has_chart_opts:
-            if has_chart_opts:
-                # Chart-option questions (all options are "如图所示" etc.) need
-                # ALL images on the end page — don't clip at end_y, because the
-                # end_y belongs to the next question's section on a later page
-                # and would incorrectly exclude chart images from the current page.
-                # Render chart option images at 60% scale to keep them compact
-                # and prevent them from displacing the next section's material.
-                _CHART_OPTION_IMG_SCALE = 0.6
-                end_page = getattr(question, "source_end_page", None) or question.source_page
-                end_y = getattr(question, "source_end_y_mm", None)
-                for img in self._take_images_in_source_range(
-                    start_page=question.source_page,
-                    start_y=getattr(question, "source_y_mm", 0) or 0,
-                    end_page=end_page,
-                    end_y=end_y,
-                ):
-                    self._add_image(img, max_scale=_CHART_OPTION_IMG_SCALE)
-            else:
-                self._place_images_for_question(question, self._page_questions.get(question.source_page, []))
+        elif has_chart_opts:
+            # Chart-option questions (all options are "如图所示" etc.) need
+            # ALL images on the end page — don't clip at end_y, because the
+            # end_y belongs to the next question's section on a later page
+            # and would incorrectly exclude chart images from the current page.
+            # Render chart option images at 80% scale — compact enough to
+            # avoid displacing the next section, but large enough for
+            # embedded chart labels (pie chart legends, axis annotations)
+            # to remain legible.
+            _CHART_OPTION_IMG_SCALE = 0.8
+            end_page = getattr(question, "source_end_page", None) or question.source_page
+            end_y = getattr(question, "source_end_y_mm", None)
+            for img in self._take_images_in_source_range(
+                start_page=question.source_page,
+                start_y=getattr(question, "source_y_mm", 0) or 0,
+                end_page=end_page,
+                end_y=end_y,
+            ):
+                self._add_image(img, max_scale=_CHART_OPTION_IMG_SCALE)
         elif is_last:
             # Last DA question: extend range to capture trailing option images,
             # but exclude the final watermark page (QR code / ad pages at the
@@ -318,13 +321,22 @@ class LayoutEngine:
             end_page = question.source_page
             if self._images_by_page:
                 last_q_page = max(self._page_questions.keys()) if self._page_questions else question.source_page
-                # Only allow one overflow page if the last question has chart
-                # options that might spill over (e.g. bar chart choices).
+                # Allow one overflow page if the last question has chart-based
+                # options (e.g. "如图所示") OR if the stem mentions a chart /
+                # diagram keyword (柱状图, 折线图, 饼图, 图表, 如图, 见下图…).
+                # Text-based option charts (e.g. Q130's bar chart) are on
+                # the page after the stem, not captured by the option-text check.
                 _has_chart_opts = any(
-                    (o.text or "").strip() in ("如图所示", "如下图", "")
+                    (o.text or "").strip() in _CHART_PLACEHOLDERS
                     for o in question.options
                 ) if question.options else False
-                overflow = 1 if _has_chart_opts else 0
+                _stem_mentions_chart = bool(
+                    question.stem and re.search(
+                        r'(柱状图|折线图|饼图|图表|如图|下图|上图|见图)',
+                        question.stem,
+                    )
+                )
+                overflow = 1 if (_has_chart_opts or _stem_mentions_chart) else 0
                 max_page = min(max(self._images_by_page.keys()), last_q_page + overflow)
                 if max_page > end_page:
                     end_page = max_page
@@ -335,6 +347,8 @@ class LayoutEngine:
                 end_y=None,
             ):
                 self._add_image(img)
+        else:
+            self._place_images_for_question(question, self._page_questions.get(question.source_page, []))
 
         self._ensure_space(1)
         self._current_y += 1
@@ -855,11 +869,23 @@ class LayoutEngine:
         return grouped
 
     def _place_images_for_question(self, question: Question, page_questions: list[Question]):
+        # For data analysis questions, extend the end-Y range by a margin so
+        # trailing option images (bar charts, etc.) that fall between this
+        # question's end and the next question's start are not lost.
+        is_da = getattr(question, "is_data_analysis", False)
+        end_y = getattr(question, "source_end_y_mm", None)
+        if is_da and end_y is not None:
+            # Use a tight 3 mm margin so images that start immediately after
+            # the question text are captured, but images belonging to the
+            # next question on the same page (e.g. section-level charts) are
+            # not stolen.  A larger margin was causing Q120→Q121 and
+            # Q124→Q125 cross-question image bleed.
+            end_y = end_y + 3.0
         for img in self._take_images_in_source_range(
             start_page=question.source_page,
             start_y=getattr(question, "source_y_mm", 0) or 0,
             end_page=getattr(question, "source_end_page", None) or question.source_page,
-            end_y=getattr(question, "source_end_y_mm", None),
+            end_y=end_y,
         ):
             self._add_image(img)
 
@@ -924,8 +950,9 @@ class LayoutEngine:
         # These are often PDF rendering artifacts — a screenshot of the page
         # header area that duplicates the already-extracted text content.
         # Criteria: near-full page width, starts at page top (y < 5mm),
-        # and shorter than 40% of page height (to keep full-page scans).
-        if img.width_mm > page_w * 0.90 and img.bbox[1] < 5 and img.height_mm < page_h * 0.4:
+        # and shorter than 25 mm.  Content charts (bar charts, pie charts)
+        # are typically taller than 25 mm and must not be filtered.
+        if img.width_mm > page_w * 0.90 and img.bbox[1] < 5 and img.height_mm < 25:
             return
         scale = min(
             self.content_width / max(img.width_mm, 1),
@@ -1003,10 +1030,18 @@ class LayoutEngine:
         return bool(re.search(r"\d\s+[+\-*/×÷=]\s*\d", text or ""))
 
     @staticmethod
-    def _stem_segments(text: str) -> list[str]:
+    def _stem_segments(text: str, section_heading: str = "") -> list[str]:
         normalized = LayoutEngine._normalize_question_text(text)
         if not normalized:
             return [""]
+        # Only split at circled numbers (①-⑩) in 政治理论/常识判断 sections
+        # where they represent sub-question numbering. In other modules these
+        # symbols are regular content and should not force line breaks.
+        is_political_or_common = (
+            "政治理论" in section_heading or "常识判断" in section_heading
+        )
+        if not is_political_or_common:
+            return [normalized]
         circled = "".join(chr(c) for c in (0x2460, 0x2461, 0x2462, 0x2463, 0x2464, 0x2465, 0x2466, 0x2467, 0x2468, 0x2469))
         matches = list(re.finditer(f"[{re.escape(circled)}]", normalized))
         if not matches:

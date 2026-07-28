@@ -26,8 +26,6 @@ project_datas += collect_files(
 hidden_imports = []
 hidden_imports += collect_submodules('fitz')
 hidden_imports += collect_submodules('PIL')
-hidden_imports += collect_submodules('paddleocr')
-hidden_imports += collect_submodules('paddle')
 
 a = Analysis(
     ['main.py'],

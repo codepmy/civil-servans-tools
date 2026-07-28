@@ -15,8 +15,9 @@ import fitz
 import numpy as np
 
 from tools.ocr_engine import PaddleRecognizer, OCRRegion
-from tools.pdf_converter.core.models import ParsedDocument, ParsedPage, TextBlock
+from tools.pdf_converter.core.models import ParsedDocument, ParsedPage, TextBlock, ImageBlock
 from tools.pdf_converter.core.parser.base import BaseParser
+from tools.pdf_converter.core.parser.text_parser import TextParser
 
 
 class OCRParser(BaseParser):
@@ -104,7 +105,7 @@ class OCRParser(BaseParser):
             metadata={
                 "title": "",
                 "page_count": total,
-                "file_path": "",
+                "file_path": path,
                 "ocr_device": self._device_label,
                 "ocr_gpu": self._using_gpu,
             },
@@ -157,10 +158,38 @@ class OCRParser(BaseParser):
 
         return ParsedPage(
             blocks=blocks,
+            images=self._extract_ocr_page_images(page, page_index),
             page_number=page_index + 1,
             width_mm=width_mm,
             height_mm=height_mm,
         )
+
+    # ------------------------------------------------------------------
+    # Image extraction (delegates to TextParser's visual-block logic)
+    # ------------------------------------------------------------------
+
+    _text_parser_for_images: TextParser | None = None
+
+    @classmethod
+    def _extract_ocr_page_images(cls, page: fitz.Page, page_index: int) -> list[ImageBlock]:
+        """Extract chart / table / drawing images from a scanned PDF page.
+
+        Scanned pages are composed of high-resolution raster images, but
+        they may still contain vector drawings (table borders, chart axes)
+        and embedded image objects.  Reuse TextParser's visual-block
+        extraction to capture them.
+        """
+        if cls._text_parser_for_images is None:
+            cls._text_parser_for_images = TextParser()
+        # Skip the cover-page filter (page_index == 0) for OCR PDFs — scanned
+        # PDFs rarely have decorative covers, and skipping page 0 would drop
+        # legitimate content images.
+        try:
+            return cls._text_parser_for_images._extract_visual_blocks(
+                page, page.rect, page_index, skip_cover=False
+            )
+        except Exception:
+            return []
 
     # ------------------------------------------------------------------
     # Quality filter
