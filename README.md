@@ -170,7 +170,6 @@ CivilServantsTools/
 - 目前仅支持 **Windows 10 / 11（64 位）** 平台，macOS / Linux 尚未适配
 - OCR 引擎（PaddleOCR）首次使用需等待模型下载与加载，GPU 加速依赖 CUDA 版 PaddlePaddle。
 - 排版转换对**非标准版式**的第三方 App 导出 PDF 可能存在兼容性问题，建议优先使用粉笔 App 导出的 PDF
-- 打包版 exe 体积较大（含 PaddleOCR/PaddlePaddle 运行库），约 600MB+
 
 ### 🖥️ RTX 50 系列（Blackwell）GPU 加速尚未支持
 

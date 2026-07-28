@@ -5,6 +5,10 @@ Provides a unified interface over PaddleOCR 3.x so both
 """
 
 from tools.ocr_engine.base import BaseRecognizer, OCRRegion
-from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
 
-__all__ = ["BaseRecognizer", "OCRRegion", "PaddleRecognizer"]
+__all__ = ["BaseRecognizer", "OCRRegion"]
+
+# PaddleRecognizer is NOT imported at module level to prevent PyInstaller
+# from statically discovering and bundling the entire PaddlePaddle library
+# (~1.8 GB).  Callers that need recognition must use a lazy import:
+#     from tools.ocr_engine.paddle_recognizer import PaddleRecognizer

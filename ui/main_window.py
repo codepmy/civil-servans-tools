@@ -182,6 +182,11 @@ class MainWindow(QMainWindow):
         self.action_donate.triggered.connect(self._show_donate_dialog)
         menubar.addAction(self.action_donate)
 
+        # 安装依赖 — 紧挨着"打赏"右侧
+        self.action_install_deps = QAction("📦 安装依赖", self)
+        self.action_install_deps.triggered.connect(self._run_setup_bat)
+        menubar.addAction(self.action_install_deps)
+
         self.toolbar = MainToolbar()
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
 
@@ -467,6 +472,7 @@ class MainWindow(QMainWindow):
         self.pdf_merger_page.status_message.connect(self._show_merger_status)
         self.ocr_recognizer_page.back_requested.connect(self._show_home)
         self.ocr_recognizer_page.status_message.connect(self._show_ocr_status)
+        self.ocr_recognizer_page.install_deps_requested.connect(self._run_setup_bat)
 
     def _on_batch(self):
         dialog = BatchDialog(self._fonts, self)
@@ -608,7 +614,7 @@ class MainWindow(QMainWindow):
         msg.setWindowTitle("缺少 OCR 依赖")
         msg.setText(
             "该 PDF 为扫描版/图片型，需要安装 OCR 引擎才能识别文字。\n\n"
-            "是否运行 setup.bat 自动安装？"
+            "是否立即安装？"
         )
         msg.setInformativeText(error_msg.split("\n")[-1] if "\n" in error_msg else "")
         msg.setStandardButtons(
@@ -624,11 +630,13 @@ class MainWindow(QMainWindow):
         if msg.exec() == QMessageBox.StandardButton.Yes:
             self._run_setup_bat()
 
+    _setup_poll_timer: QTimer | None = None
+    _setup_poll_count: int = 0
+
     def _run_setup_bat(self):
-        """运行 setup.bat 安装 OCR 依赖。"""
+        """运行 setup.bat 安装 OCR 依赖。统一入口，菜单按钮 / OCR 弹窗均走此方法。"""
         bat_path = resource_path("setup.bat")
         if not bat_path.exists():
-            # frozen 环境可能未打包 setup.bat，尝试 exe 同级目录
             if getattr(sys, "frozen", False):
                 bat_path = Path(sys.executable).parent / "setup.bat"
         if not bat_path.exists():
@@ -640,15 +648,67 @@ class MainWindow(QMainWindow):
                 "3. 等待安装完成后重新启动程序"
             )
             return
-        self.status_bar.showMessage("正在安装 OCR 依赖，请稍候...")
+
+        # 清除旧结果文件
+        result_dir = os.path.join(os.environ.get("APPDATA", ""), "CivilServantsTools")
+        result_file = os.path.join(result_dir, "setup_result.txt")
+        try:
+            os.remove(result_file)
+        except OSError:
+            pass
+
+        # 禁用按钮，防止重复启动
+        self.action_install_deps.setEnabled(False)
+        self.status_bar.showMessage("正在安装 OCR 依赖，请等待 setup.bat 窗口...")
         try:
             os.startfile(str(bat_path))
-            QMessageBox.information(
-                self, "正在安装",
-                "setup.bat 正在运行，安装完成后请重新启动程序。"
-            )
         except Exception as exc:
             QMessageBox.warning(self, "启动安装失败", str(exc))
+            self.action_install_deps.setEnabled(True)
+            self.status_bar.showMessage("就绪")
+            return
+
+        # 启动轮询，每 2 秒检查安装结果
+        self._setup_poll_count = 0
+        if self._setup_poll_timer is None:
+            self._setup_poll_timer = QTimer(self)
+
+        def _check_result():
+            self._setup_poll_count += 1
+            try:
+                content = Path(result_file).read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                content = ""
+
+            if content.startswith("OK"):
+                self._setup_poll_timer.stop()
+                QMessageBox.information(
+                    self, "安装成功",
+                    "OCR 依赖安装成功！\n\n请重启程序以使用 OCR 功能。"
+                )
+                self.action_install_deps.setEnabled(True)
+                self.status_bar.showMessage("OCR 依赖就绪，请重启程序。")
+            elif content.startswith("FAIL"):
+                self._setup_poll_timer.stop()
+                QMessageBox.warning(
+                    self, "安装失败",
+                    "OCR 依赖安装失败。\n\n请检查 setup.bat 窗口中的错误信息，"
+                    "解决后重新运行安装。"
+                )
+                self.action_install_deps.setEnabled(True)
+                self.status_bar.showMessage("OCR 依赖安装失败")
+            elif self._setup_poll_count >= 600:  # 20 分钟超时
+                self._setup_poll_timer.stop()
+                self.action_install_deps.setEnabled(True)
+                self.status_bar.showMessage("就绪")
+            # else: still RUNNING — keep polling
+
+        try:
+            self._setup_poll_timer.timeout.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self._setup_poll_timer.timeout.connect(_check_result)
+        self._setup_poll_timer.start(2000)
 
     def _show_cudnn_dialog(self, error_msg: str):
         """弹出 cuDNN 下载对话框（带跳转按钮）。"""

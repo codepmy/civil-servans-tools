@@ -11,7 +11,7 @@ import numpy as np
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from tools.ocr_engine import OCRRegion, PaddleRecognizer
+from tools.ocr_engine.base import OCRRegion
 from tools.ocr_recognizer.core.preprocessing import preprocess_for_ocr
 
 
@@ -44,6 +44,8 @@ class OCRWorker(QThread):
 
     def run(self) -> None:
         try:
+            from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
+
             self.progress.emit(10, "加载图片…")
 
             img = Image.open(self._image_path)

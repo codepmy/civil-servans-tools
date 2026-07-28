@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from tools.ocr_engine import OCRRegion
+from tools.ocr_engine.base import OCRRegion
 from tools.ocr_recognizer.ui.worker import OCRWorker
 
 # ── supported image extensions ────────────────────────────────────────
@@ -59,6 +59,7 @@ class OCRRecognizerWidget(QWidget):
 
     back_requested = pyqtSignal()
     status_message = pyqtSignal(str)
+    install_deps_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -375,7 +376,7 @@ class OCRRecognizerWidget(QWidget):
             msg.setDefaultButton(install_btn)
             msg.exec()
             if msg.clickedButton() == install_btn:
-                self._run_setup_bat()
+                self.install_deps_requested.emit()
             return
 
         self._btn_recognise.setEnabled(False)
@@ -499,28 +500,8 @@ class OCRRecognizerWidget(QWidget):
         self._btn_copy.setEnabled(has_result)
         self._btn_export.setEnabled(has_result)
 
-    @staticmethod
-    def _run_setup_bat() -> None:
-        """Open setup.bat in a new terminal window."""
-        from app_paths import app_root
-
-        setup_path = app_root() / "setup.bat"
-        if not setup_path.is_file():
-            QMessageBox.warning(
-                None, "未找到安装脚本",
-                f"未找到 setup.bat。\n预期位置: {setup_path}\n\n"
-                "请手动运行: pip install paddlepaddle paddleocr",
-            )
-            return
-
-        try:
-            os.startfile(str(setup_path))
-        except Exception as exc:
-            QMessageBox.warning(
-                None, "启动失败",
-                f"无法启动 setup.bat：\n{exc}\n\n"
-                "请手动双击运行项目根目录下的 setup.bat。",
-            )
+    # _run_setup_bat removed — the install_deps_requested signal is emitted
+    # instead, and MainWindow._run_setup_bat() handles the actual execution.
 
 
 # ======================================================================

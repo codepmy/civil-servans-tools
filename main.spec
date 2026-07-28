@@ -16,7 +16,11 @@ def collect_files(root, patterns):
 
 project_datas = [
     ('resources', 'resources'),
-    ('version.json', '.')
+    ('version.json', '.'),
+    ('setup.bat', '.'),
+    ('setup_runner.ps1', '.'),
+    ('setup_env_check.py', '.'),
+    ('requirements.txt', '.'),
 ]
 project_datas += collect_files(
     'tools/pdf_converter/config',
@@ -26,6 +30,11 @@ project_datas += collect_files(
 hidden_imports = []
 hidden_imports += collect_submodules('fitz')
 hidden_imports += collect_submodules('PIL')
+hidden_imports += [
+    'tools.ocr_engine',
+    'tools.ocr_engine.base',
+    'tools.ocr_engine.paddle_recognizer',
+]
 
 a = Analysis(
     ['main.py'],
@@ -36,7 +45,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['paddle', 'paddleocr', 'paddlex', 'ppocr', 'ppstructure'],
     noarchive=False,
     optimize=0,
 )

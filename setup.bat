@@ -18,6 +18,11 @@ pause
 exit /b %SETUP_EXIT%
 
 :main
+set "RESULT_DIR=%APPDATA%\CivilServantsTools"
+if not exist "%RESULT_DIR%" mkdir "%RESULT_DIR%"
+set "RESULT_FILE=%RESULT_DIR%\setup_result.txt"
+echo RUNNING> "%RESULT_FILE%"
+
 echo ========================================
 echo   CivilServantsTools - Setup
 echo ========================================
@@ -25,18 +30,18 @@ echo.
 
 echo [1/6] Checking Python...
 call :find_python
-if errorlevel 1 exit /b 1
+if errorlevel 1 goto fail
 
 echo Python command: "%PYTHON_EXE%" %PYTHON_ARGS%
 "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --python
-if errorlevel 1 exit /b 1
+if errorlevel 1 goto fail
 echo OK.
 echo.
 
 echo [2/6] Upgrading pip...
 "%PYTHON_EXE%" %PYTHON_ARGS% -m ensurepip --upgrade
 "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install --upgrade pip
-if errorlevel 1 exit /b 1
+if errorlevel 1 goto fail
 echo OK.
 echo.
 
@@ -71,7 +76,7 @@ if errorlevel 1 (
     echo Retry with Aliyun mirror...
     "%PYTHON_EXE%" %PYTHON_ARGS% -m pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
     "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%~dp0requirements.txt"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 goto fail
 )
 echo OK.
 echo.
@@ -100,29 +105,26 @@ if "%HAS_NVIDIA%"=="1" (
     echo No NVIDIA GPU found — using CPU build.
 )
 
-:: numpy<2.0 MUST be installed before PaddlePaddle because PaddlePaddle
-:: 2.6.2's C extensions are compiled against numpy 1.x ABI.
+:: numpy<2.0 MUST be installed alongside PaddlePaddle in ONE pip call,
+:: otherwise scipy/scikit-image can pull numpy>=2.0 and break PaddlePaddle.
 echo Installing numpy 1.x + PaddlePaddle 2.6.2 + PaddleOCR 2.7.3...
-"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install "numpy>=1.26.0,<2.0.0"
-if errorlevel 1 exit /b 1
-
-"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install %PADDLE_PKG% paddleocr==2.7.3
+"%PYTHON_EXE%" %PYTHON_ARGS% -m pip install "numpy>=1.26.0,<2.0.0" %PADDLE_PKG% paddleocr==2.7.3
 if errorlevel 1 (
     echo [WARN] Install failed. Trying CPU PaddlePaddle as fallback...
-    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install paddlepaddle==2.6.2 paddleocr==2.7.3
-    if errorlevel 1 exit /b 1
+    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install "numpy>=1.26.0,<2.0.0" paddlepaddle==2.6.2 paddleocr==2.7.3
+    if errorlevel 1 goto fail
 )
 
 echo Verifying PaddleOCR installation...
 "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --ocr
-if errorlevel 1 exit /b 1
+if errorlevel 1 goto fail
 echo OK.
 echo.
 
 echo Verifying OCR GPU status...
 if "%HAS_NVIDIA%"=="1" (
     "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --paddle-cuda-required
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 goto fail
 ) else (
     "%PYTHON_EXE%" %PYTHON_ARGS% setup_env_check.py --paddle-cuda
 )
@@ -134,7 +136,13 @@ if "%HAS_NVIDIA%"=="1" (
     echo   Setup complete. PaddleOCR will use CPU because no NVIDIA GPU was detected.
 )
 echo ========================================
+echo OK> "%RESULT_FILE%"
 exit /b 0
+
+:fail
+echo FAIL> "%RESULT_FILE%"
+echo [ERROR] Setup failed.>> "%RESULT_FILE%"
+exit /b 1
 
 :find_python
 set "PYTHON_EXE="

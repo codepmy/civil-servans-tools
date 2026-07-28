@@ -14,7 +14,7 @@ from typing import Callable
 import fitz
 import numpy as np
 
-from tools.ocr_engine import PaddleRecognizer, OCRRegion
+from tools.ocr_engine.base import OCRRegion
 from tools.pdf_converter.core.models import ParsedDocument, ParsedPage, TextBlock, ImageBlock
 from tools.pdf_converter.core.parser.base import BaseParser
 from tools.pdf_converter.core.parser.text_parser import TextParser
@@ -31,6 +31,7 @@ class OCRParser(BaseParser):
     @classmethod
     def is_first_time(cls) -> bool:
         """Return whether the PaddleOCR model cache appears empty."""
+        from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
         return PaddleRecognizer.is_first_time()
 
     @property
@@ -44,13 +45,14 @@ class OCRParser(BaseParser):
     @staticmethod
     def _ensure_ocr_engine() -> PaddleRecognizer:
         """Create a PaddleRecognizer, raising a user-friendly error on failure."""
+        from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
         try:
             return PaddleRecognizer()
         except ImportError as exc:
             raise RuntimeError(
-                "当前环境未安装 OCR 依赖（PaddleOCR/PaddlePaddle），"
-                "请运行 setup.bat 安装。\n"
-                "如果需要 GPU 加速，请确认 setup.bat 末尾的 CUDA 检查通过。\n"
+                "当前环境未安装 OCR 依赖（PaddleOCR/PaddlePaddle）。\n"
+                "请点击菜单栏「📦 安装依赖」自动安装。\n"
+                "如果需要 GPU 加速，安装时会自动检测。\n"
                 "\n"
                 f"原始错误: {exc}"
             ) from exc
