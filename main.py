@@ -44,7 +44,11 @@ def main():
 
     style_path = resource_path("resources", "styles", "app.qss")
     if style_path.exists():
-        app.setStyleSheet(style_path.read_text(encoding="utf-8"))
+        qss = style_path.read_text(encoding="utf-8")
+        # 将 %RESOURCES% 替换为实际资源目录的绝对路径
+        res_dir = resource_path("resources")
+        qss = qss.replace("%RESOURCES%", res_dir.as_posix())
+        app.setStyleSheet(qss)
 
     window = MainWindow()
     if icon_path.exists():

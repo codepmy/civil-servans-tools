@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -173,6 +174,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(800, lambda: self._check_updates(silent=True))
         self._init_screenshot_ocr()
         self._init_tray_icon()
+        QTimer.singleShot(1500, self._maybe_show_socr_intro)
 
     def _setup_ui(self):
         menubar = self.menuBar()
@@ -959,6 +961,96 @@ class MainWindow(QMainWindow):
         if self._socr_mgr is not None:
             self._socr_mgr.trigger()
 
+    def _maybe_show_socr_intro(self) -> None:
+        """首次启动时展示截图 OCR 功能说明（仅一次）。"""
+        try:
+            path = user_config_path()
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data.get("socr_intro_shown"):
+                    return
+        except Exception:
+            pass
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("新功能提示")
+        dialog.setFixedSize(400, 220)
+        dialog.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Dialog
+        )
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        dialog.setStyleSheet("QDialog { background-color: #FFFFFF; }")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(28, 24, 28, 16)
+        layout.setSpacing(10)
+
+        icon_title = QLabel("📷 截图 OCR 识别")
+        icon_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #4F46E5;")
+        layout.addWidget(icon_title)
+
+        desc = QLabel(
+            "现在你可以随时随地截取屏幕上的文字，自动识别并复制到剪贴板。"
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 13px; color: #374151; line-height: 1.5;")
+        layout.addWidget(desc)
+
+        steps = QLabel(
+            "① 按下 <b>Ctrl + Shift + A</b> 启动截图<br>"
+            "② 拖拽鼠标框选文字区域<br>"
+            "③ 松开鼠标，识别结果自动复制<br>"
+            "④ 在任意位置 <b>Ctrl + V</b> 粘贴"
+        )
+        steps.setWordWrap(True)
+        steps.setTextFormat(Qt.TextFormat.RichText)
+        steps.setStyleSheet(
+            "font-size: 12px; color: #6B7280; "
+            "background: #F9FAFB; border-radius: 8px; padding: 10px; "
+            "line-height: 1.8;"
+        )
+        layout.addWidget(steps)
+
+        hint = QLabel(
+            "❗ 启动后第一次识别约需 2 秒初始化引擎，之后即可秒出结果<br>"
+            "💡 程序最小化到托盘后，快捷键仍然有效"
+        )
+        hint.setWordWrap(True)
+        hint.setTextFormat(Qt.TextFormat.RichText)
+        hint.setStyleSheet("font-size: 12px; color: #9CA3AF; line-height: 1.6;")
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        chk = QCheckBox("不再显示此提示")
+        chk.setStyleSheet("font-size: 12px; color: #9CA3AF;")
+        layout.addWidget(chk)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_ok = QPushButton("知道了")
+        btn_ok.setFixedSize(100, 32)
+        btn_ok.setStyleSheet(PRIMARY_BUTTON_STYLE)
+        btn_ok.clicked.connect(dialog.accept)
+        btn_row.addWidget(btn_ok)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        def _on_dismiss():
+            if chk.isChecked():
+                try:
+                    p = user_config_path()
+                    existing = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+                    existing["socr_intro_shown"] = True
+                    p.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+
+        dialog.accepted.connect(_on_dismiss)
+        dialog.finished.connect(_on_dismiss)  # 也处理关闭按钮
+        dialog.show()  # 非模态 — 不阻塞用户操作
+
     def _show_hotkey_settings(self) -> None:
         """打开快捷键设置对话框。"""
         if self._socr_mgr is None:
@@ -1037,19 +1129,160 @@ class MainWindow(QMainWindow):
     # ── closeEvent ─────────────────────────────────────────────────
 
     def closeEvent(self, event) -> None:
-        """关闭窗口 → 最小化到托盘；若托盘不可用则直接退出。"""
-        if self._tray_icon is not None and self._tray_icon.isVisible():
-            self.hide()
-            self._tray_icon.showMessage(
-                "公考小工具",
-                "程序已最小化到系统托盘\n截图 OCR 快捷键仍可使用",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000,
-            )
-            event.ignore()
-        else:
+        """关闭窗口 → 弹窗询问退出/最小化（可记住选择）。"""
+        if self._tray_icon is None or not self._tray_icon.isVisible():
             self._cleanup_screenshot_ocr()
             event.accept()
+            return
+
+        # 检查是否已记住选择
+        saved = self._load_close_action()
+        if saved == "quit":
+            self._tray_icon.hide()
+            self._cleanup_screenshot_ocr()
+            event.accept()
+            return
+        elif saved == "tray":
+            self.hide()
+            event.ignore()
+            return
+
+        # 未记住 → 弹窗询问
+        dialog = QDialog(self)
+        dialog.setWindowTitle("关闭提示")
+        dialog.setFixedSize(340, 226)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        dialog.setStyleSheet("QDialog { background-color: #FFFFFF; }")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # ── 标题栏 ──
+        title = QLabel("确认关闭操作")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            "font-size: 16px; font-weight: 700; color: #1F2937; "
+            "padding: 22px 0 14px 0;"
+        )
+        layout.addWidget(title)
+
+        # ── 内容区 ──
+        content = QVBoxLayout()
+        content.setContentsMargins(28, 0, 28, 0)
+        content.setSpacing(0)
+
+        radio_tray = QRadioButton("最小化到系统托盘")
+        radio_tray.setStyleSheet(
+            "QRadioButton { font-size: 13px; color: #1F2937; "
+            "padding: 4px 0; spacing: 8px; }"
+        )
+        content.addWidget(radio_tray)
+
+        radio_quit = QRadioButton("退出程序")
+        radio_quit.setStyleSheet(
+            "QRadioButton { font-size: 13px; color: #1F2937; "
+            "padding: 4px 0; spacing: 8px; }"
+        )
+        radio_tray.setChecked(True)
+        content.addWidget(radio_quit)
+
+        # 分隔线
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("QFrame { color: #F3F4F6; margin: 8px 0; }")
+        content.addWidget(sep)
+
+        chk_remember = QCheckBox("记住我的选择，不再询问")
+        chk_remember.setStyleSheet(
+            "QCheckBox { font-size: 12px; color: #6B7280; padding: 4px 0; spacing: 6px; }"
+        )
+        content.addWidget(chk_remember)
+
+        layout.addLayout(content)
+        layout.addSpacing(12)
+
+        # ── 底部按钮 ──
+        btn_bar = QWidget()
+        btn_bar.setStyleSheet("QWidget { background-color: #F9FAFB; border-top: 1px solid #F3F4F6; }")
+        btn_layout = QHBoxLayout(btn_bar)
+        btn_layout.setContentsMargins(16, 12, 16, 12)
+        btn_layout.setSpacing(10)
+        btn_layout.addStretch()
+
+        btn_ok = QPushButton("确定")
+        btn_ok.setFixedSize(90, 34)
+        btn_ok.setStyleSheet(
+            "QPushButton { background-color: #4F46E5; color: #FFFFFF; "
+            "border: 1px solid #4F46E5; border-radius: 6px; "
+            "font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #4338CA; border-color: #4338CA; }"
+        )
+        btn_ok.clicked.connect(dialog.accept)
+        btn_layout.addWidget(btn_ok)
+
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setFixedSize(90, 34)
+        btn_cancel.setStyleSheet(
+            "QPushButton { background-color: #FFFFFF; color: #374151; "
+            "border: 1px solid #D1D5DB; border-radius: 6px; "
+            "font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background-color: #F9FAFB; border-color: #9CA3AF; }"
+        )
+        btn_cancel.clicked.connect(dialog.reject)
+        btn_layout.addWidget(btn_cancel)
+
+        btn_layout.addStretch()
+        layout.addWidget(btn_bar)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            # 取消 → 什么都不做
+            event.ignore()
+            return
+
+        # 确定 → 执行选择
+        if chk_remember.isChecked():
+            if radio_quit.isChecked():
+                self._save_close_action("quit")
+            else:
+                self._save_close_action("tray")
+
+        if radio_quit.isChecked():
+            self._tray_icon.hide()
+            self._cleanup_screenshot_ocr()
+            event.accept()
+        else:
+            self.hide()
+            event.ignore()
+
+    def _load_close_action(self) -> str:
+        """从 user_config 读取已记住的关闭操作。返回 'quit' / 'tray' / ''。"""
+        try:
+            path = user_config_path()
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return str(data.get("close_action", "")).strip()
+        except Exception:
+            pass
+        return ""
+
+    def _save_close_action(self, action: str) -> None:
+        """将关闭操作偏好写入 user_config。"""
+        try:
+            path = user_config_path()
+            existing: dict = {}
+            if path.exists():
+                try:
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            existing["close_action"] = action
+            path.write_text(
+                json.dumps(existing, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
     # ── 打赏 ───────────────────────────────────────────────────────
 

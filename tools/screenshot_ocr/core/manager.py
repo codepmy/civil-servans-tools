@@ -97,6 +97,9 @@ class ScreenshotOCRManager(QObject):
             Toast.show_message(message, variant="error", duration_ms=6000)
 
     def _on_hotkey(self) -> None:
+        # 有模态弹窗时忽略快捷键，避免截图覆盖层卡死
+        if QApplication.activeModalWidget() is not None:
+            return
         try:
             self._overlay = ScreenshotOverlay()
             self._overlay.captured.connect(self._on_captured)

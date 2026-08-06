@@ -278,6 +278,7 @@ QCheckBox::indicator:hover {
 QCheckBox::indicator:checked {
     background-color: #4F46E5;
     border-color: #4F46E5;
+    image: url(%RESOURCES%/styles/checkmark.svg);
 }
 
 /* ---- 标签 ---- */
