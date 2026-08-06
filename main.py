@@ -49,6 +49,10 @@ def main():
     window = MainWindow()
     if icon_path.exists():
         window.setWindowIcon(QIcon(str(icon_path)))
+
+    # 退出前清理截图 OCR 资源（注销全局热键 + 关闭 OCR 子进程）
+    app.aboutToQuit.connect(window._cleanup_screenshot_ocr)
+
     window.show()
 
     sys.exit(app.exec())

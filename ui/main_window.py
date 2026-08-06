@@ -10,8 +10,9 @@ import urllib.request
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QDesktopServices, QPixmap
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QFileDialog,
@@ -20,12 +21,14 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
     QStatusBar,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -43,6 +46,8 @@ from tools.answer_sheet.ui.widget import AnswerSheetWidget
 from tools.exam_timer.ui.timer_widget import TimerWidget
 from tools.pdf_merger.ui.widget import PdfMergerWidget
 from tools.ocr_recognizer.ui.recognizer_widget import OCRRecognizerWidget
+from tools.screenshot_ocr.core.manager import ScreenshotOCRManager
+from tools.screenshot_ocr.ui.hotkey_settings import HotkeySettingsDialog
 
 
 DEFAULT_APP_METADATA = {
@@ -150,6 +155,8 @@ class MainWindow(QMainWindow):
         self._progress_dialog: ProgressDialog | None = None
         self._update_worker: UpdateCheckWorker | None = None
         self._update_check_silent = False
+        self._socr_mgr: ScreenshotOCRManager | None = None
+        self._tray_icon: QSystemTrayIcon | None = None
 
         self.setWindowTitle("公考小工具")
         self.resize(1400, 850)
@@ -164,16 +171,18 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._connect_signals()
         QTimer.singleShot(800, lambda: self._check_updates(silent=True))
+        self._init_screenshot_ocr()
+        self._init_tray_icon()
 
     def _setup_ui(self):
         menubar = self.menuBar()
 
-        help_menu = menubar.addMenu("帮助(&H)")
-        self.action_check_updates = QAction("检查更新(&U)", self)
+        help_menu = menubar.addMenu("帮助")
+        self.action_check_updates = QAction("检查更新", self)
         self.action_check_updates.triggered.connect(self._check_updates)
         help_menu.addAction(self.action_check_updates)
         help_menu.addSeparator()
-        action_about = QAction("关于(&A)", self)
+        action_about = QAction("关于", self)
         action_about.triggered.connect(self._show_about)
         help_menu.addAction(action_about)
 
@@ -186,6 +195,16 @@ class MainWindow(QMainWindow):
         self.action_install_deps = QAction("📦 安装依赖", self)
         self.action_install_deps.triggered.connect(self._run_setup_bat)
         menubar.addAction(self.action_install_deps)
+
+        # 截图 OCR — 紧挨着"安装依赖"右侧
+        socr_menu = menubar.addMenu("截图OCR")
+        self.action_screenshot_ocr = QAction("立即截图识别", self)
+        self.action_screenshot_ocr.triggered.connect(self._trigger_screenshot_ocr)
+        socr_menu.addAction(self.action_screenshot_ocr)
+        socr_menu.addSeparator()
+        self.action_hotkey_settings = QAction("快捷键设置...", self)
+        self.action_hotkey_settings.triggered.connect(self._show_hotkey_settings)
+        socr_menu.addAction(self.action_hotkey_settings)
 
         self.toolbar = MainToolbar()
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
@@ -922,6 +941,117 @@ class MainWindow(QMainWindow):
             )
         except Exception:
             pass
+
+    # ── 截图 OCR ──────────────────────────────────────────────────
+
+    def _init_screenshot_ocr(self) -> None:
+        """初始化截图 OCR 管理器，注册全局热键。"""
+        try:
+            self._socr_mgr = ScreenshotOCRManager(self)
+            self._socr_mgr.status_message.connect(self._on_socr_status)
+            self._socr_mgr.start()
+        except Exception:
+            # OCR 环境未就绪不影响程序正常使用
+            pass
+
+    def _trigger_screenshot_ocr(self) -> None:
+        """菜单手动触发截图 OCR。"""
+        if self._socr_mgr is not None:
+            self._socr_mgr.trigger()
+
+    def _show_hotkey_settings(self) -> None:
+        """打开快捷键设置对话框。"""
+        if self._socr_mgr is None:
+            return
+        dlg = HotkeySettingsDialog(
+            current_mod_list=self._socr_mgr.current_mod_list(),
+            current_key=self._socr_mgr.current_key_name(),
+            parent=self,
+        )
+        dlg.hotkey_changed.connect(self._socr_mgr.set_hotkey)
+        dlg.exec()
+
+    def _on_socr_status(self, message: str) -> None:
+        """更新状态栏显示截图 OCR 状态。"""
+        self.status_bar.showMessage(message, 3000)
+
+    # ── 系统托盘 ───────────────────────────────────────────────────
+
+    def _init_tray_icon(self) -> None:
+        """创建系统托盘图标和右键菜单。"""
+        self._tray_icon = QSystemTrayIcon(self)
+        icon_path = resource_path("resources", "toolsIco.ico")
+        if icon_path.exists():
+            self._tray_icon.setIcon(QIcon(str(icon_path)))
+
+        tray_menu = QMenu(self)
+
+        action_capture = QAction("📷 截图识别", self)
+        action_capture.triggered.connect(self._trigger_screenshot_ocr)
+        tray_menu.addAction(action_capture)
+
+        tray_menu.addSeparator()
+
+        action_show = QAction("显示主窗口", self)
+        action_show.triggered.connect(self._show_from_tray)
+        tray_menu.addAction(action_show)
+
+        action_hotkey = QAction("快捷键设置...", self)
+        action_hotkey.triggered.connect(self._show_hotkey_settings)
+        tray_menu.addAction(action_hotkey)
+
+        tray_menu.addSeparator()
+
+        action_quit = QAction("退出", self)
+        action_quit.triggered.connect(self._quit_app)
+        tray_menu.addAction(action_quit)
+
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.setToolTip("公考小工具 — 截图OCR就绪")
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """双击托盘图标显示主窗口。"""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_from_tray()
+
+    def _show_from_tray(self) -> None:
+        """从托盘恢复主窗口。"""
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_app(self) -> None:
+        """完全退出程序。"""
+        self._tray_icon.hide()
+        self._cleanup_screenshot_ocr()
+        QApplication.instance().quit()
+
+    def _cleanup_screenshot_ocr(self) -> None:
+        """清理截图 OCR 资源。"""
+        if self._socr_mgr is not None:
+            self._socr_mgr.shutdown()
+            self._socr_mgr = None
+
+    # ── closeEvent ─────────────────────────────────────────────────
+
+    def closeEvent(self, event) -> None:
+        """关闭窗口 → 最小化到托盘；若托盘不可用则直接退出。"""
+        if self._tray_icon is not None and self._tray_icon.isVisible():
+            self.hide()
+            self._tray_icon.showMessage(
+                "公考小工具",
+                "程序已最小化到系统托盘\n截图 OCR 快捷键仍可使用",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
+            event.ignore()
+        else:
+            self._cleanup_screenshot_ocr()
+            event.accept()
+
+    # ── 打赏 ───────────────────────────────────────────────────────
 
     def _show_donate_dialog(self):
         poster_path = resource_path("resources", "author-support-poster.png")
