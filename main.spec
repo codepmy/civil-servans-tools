@@ -18,7 +18,6 @@ project_datas = [
     ('resources', 'resources'),
     ('version.json', '.'),
     ('setup.bat', '.'),
-    ('setup_runner.ps1', '.'),
     ('setup_env_check.py', '.'),
     ('requirements.txt', '.'),
 ]
