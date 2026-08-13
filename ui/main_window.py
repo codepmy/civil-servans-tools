@@ -46,6 +46,7 @@ from tools.answer_sheet.core.generator import AnswerSheetGenerator
 from tools.answer_sheet.ui.widget import AnswerSheetWidget
 from tools.exam_timer.ui.timer_widget import TimerWidget
 from tools.pdf_merger.ui.widget import PdfMergerWidget
+from tools.duplex_print.ui.widget import DuplexPrintWidget
 from tools.ocr_recognizer.ui.recognizer_widget import OCRRecognizerWidget
 from tools.screenshot_ocr.core.manager import ScreenshotOCRManager
 from tools.screenshot_ocr.ui.hotkey_settings import HotkeySettingsDialog
@@ -220,12 +221,14 @@ class MainWindow(QMainWindow):
             AnswerSheetGenerator(self._font_manager),
         )
         self.pdf_merger_page = PdfMergerWidget()
+        self.duplex_print_page = DuplexPrintWidget()
         self.ocr_recognizer_page = OCRRecognizerWidget()
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.pdf_tool_page)
         self.stack.addWidget(self.timer_tool_page)
         self.stack.addWidget(self.answer_sheet_page)
         self.stack.addWidget(self.pdf_merger_page)
+        self.stack.addWidget(self.duplex_print_page)
         self.stack.addWidget(self.ocr_recognizer_page)
         self.setCentralWidget(self.stack)
 
@@ -325,18 +328,21 @@ class MainWindow(QMainWindow):
         content_layout.addSpacing(12)
 
         active_tools = [
-            ("📄", "PDF内容格式转换",
+            ("🪄", "PDF内容格式转换",
              "将粉笔/华图等 App 导出的 PDF 转换为国考标准真题格式",
              self._show_pdf_tool),
             ("⏱", "考试计时器",
              "正计时 / 倒计时，大字显示，支持分段记录",
              self._show_timer_tool),
-            ("📝", "申论答题纸",
+            ("🗒️", "申论答题纸",
              "标准 25×24 格纸，分题/分页模式，导出 PDF 或图片",
              self._show_answer_sheet_tool),
-            ("📎", "PDF文件拼合",
+            ("🧩", "PDF文件拼合",
              "多份 PDF 按序合并，拖拽排序，一键生成",
              self._show_pdf_merger),
+            ("🖨️", "手动双面打印",
+             "单面打印机两次打印实现双面，自动重排正反面页序",
+             self._show_duplex_print),
             ("🔍", "OCR文字识别",
              "图片文字提取，支持印刷体/手写体，复制或导出 TXT",
              self._show_ocr_recognizer),
@@ -478,6 +484,11 @@ class MainWindow(QMainWindow):
         self.toolbar.hide()
         self.status_bar.showMessage("OCR文字识别 - 打开图片开始识别")
 
+    def _show_duplex_print(self):
+        self.stack.setCurrentWidget(self.duplex_print_page)
+        self.toolbar.hide()
+        self.status_bar.showMessage("手动双面打印 - 选择PDF并设置出纸与翻面方式")
+
     def _connect_signals(self):
         self.toolbar.home_clicked.connect(self._show_home)
         self.toolbar.open_clicked.connect(self._on_open)
@@ -491,6 +502,8 @@ class MainWindow(QMainWindow):
         self.answer_sheet_page.status_message.connect(self._show_answer_sheet_status)
         self.pdf_merger_page.back_requested.connect(self._show_home)
         self.pdf_merger_page.status_message.connect(self._show_merger_status)
+        self.duplex_print_page.back_requested.connect(self._show_home)
+        self.duplex_print_page.status_message.connect(self._show_duplex_status)
         self.ocr_recognizer_page.back_requested.connect(self._show_home)
         self.ocr_recognizer_page.status_message.connect(self._show_ocr_status)
         self.ocr_recognizer_page.install_deps_requested.connect(self._run_setup_bat)
@@ -505,6 +518,10 @@ class MainWindow(QMainWindow):
 
     def _show_merger_status(self, message: str):
         if self.stack.currentWidget() == self.pdf_merger_page:
+            self.status_bar.showMessage(message)
+
+    def _show_duplex_status(self, message: str):
+        if self.stack.currentWidget() == self.duplex_print_page:
             self.status_bar.showMessage(message)
 
     def _show_ocr_status(self, message: str):
@@ -1344,6 +1361,6 @@ class MainWindow(QMainWindow):
             "<p>面向公务员考试的小工具集合。</p>"
             f"<p><b>开发人:</b> {AUTHOR_NAME}<br>"
             f"<b>邮箱:</b> <a href=\"mailto:{AUTHOR_EMAIL}\">{AUTHOR_EMAIL}</a></p>"
-            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器、申论答题纸生成器、PDF文件拼合、OCR文字识别</p>"
+            "<p><b>当前工具:</b> PDF内容格式转换、考试计时器、申论答题纸生成器、PDF文件拼合、手动双面打印重排、OCR文字识别</p>"
             "<p><b>Python + PyQt6 + PyMuPDF + ReportLab + PaddleOCR</b></p>",
         )

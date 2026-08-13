@@ -88,6 +88,10 @@ CivilServantsTools/
 │   │   ├── core/merger.py           # 使用 PyMuPDF 合并
 │   │   └── ui/widget.py            # 拖拽排序 + 预览界面
 │   │
+│   ├── duplex_print/                # 手动双面打印重排
+│   │   ├── core/reorderer.py        # 页序重排（正/反面拆分、逆序、旋转）
+│   │   └── ui/widget.py            # 源文件选择 + 选项 + 页序预览 + 生成
+│   │
 │   └── ocr_recognizer/             # OCR 文字识别工具
 │       ├── core/preprocessing.py    # 图像预处理（对比度增强/锐化/去噪）
 │       └── ui/
