@@ -8,8 +8,8 @@
 
 | 项目 | 内容                         |
 |------|----------------------------|
-| **版本号** | v1.1.1                     |
-| **发布日期** | 2026-07-28                 |
+| **版本号** | v1.1.2                     |
+| **发布日期** | 2026-08-13                 |
 | **运行平台** | Windows 10 / 11（64 位）      |
 | **Python 版本** | 3.10+   < 3.13 (OCR场景依赖限制) |
 | **开源协议** | MIT License                |
@@ -104,10 +104,10 @@
 
 | 下载入口 | 推荐人群 | 链接                                                                                   |
 | --- | --- |--------------------------------------------------------------------------------------|
-| 蓝奏云满速下载 | 国内用户优先 | [下载 公考小工具v1.1.1 安装包](https://wwanl.lanzoum.com/CivilServansTools)                    |
-| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.1.1 Release](https://github.com/codepmy/civil-servans-tools/releases/tag/v1.1.1) |
+| 蓝奏云满速下载 | 国内用户优先 | [下载 公考小工具安装包](https://wwanl.lanzoum.com/s/CivilServansTools)                         |
+| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.1.2 Release](https://github.com/codepmy/civil-servans-tools/releases/tag/v1.1.2) |
 
-安装时只需要下载并运行 `CivilServansTools-v1.1.1-x64.exe`。
+安装时只需要下载并运行 `CivilServansTools-v1.1.2-x64.exe`。
 
 ## 🛠️ 技术栈
 

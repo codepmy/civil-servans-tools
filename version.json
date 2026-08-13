@@ -1,10 +1,10 @@
 {
-  "version": "1.1.1",
+  "version": "1.1.2",
   "authorName": "CodePmy",
   "authorEmail": "codepmy@163.com",
   "updateInfoUrl": "https://gitee.com/peisuer/civil-servans-tools/raw/master/version.json",
   "releaseDate": "2026-07-21",
-  "changelog": "✨ 版本更新内容\n\n- 🔍 新增 OCR文字识别工具：支持印刷体/手写体图片文字识别，复制或导出 TXT。\n\n- 🔄 OCR引擎全量升级：EasyOCR → PaddleOCR 3.x，中文识别更准确，手写体识别更强。\n\n- 🛠️ setup.bat 更新：自动卸载旧 OCR 依赖，安装 PaddlePaddle + PaddleOCR。",
+  "changelog": "✨ 版本更新内容\n- \uD83D\uDDB1\uFE0F 新增「截图文字识别」功能：按下全局快捷键 Ctrl + Shift + Z，框选屏幕任意区域，自动 OCR 识别文字并复制到剪贴板，无需打开软件窗口。\n- ⌨\uFE0F 快捷键支持自定义：菜单栏「截图OCR → 快捷键设置」可更换组合键（Ctrl / Shift / Alt / Win），配置自动保存。\n- \uD83D\uDCCB 识别结果即取即用：识别完成后右下角 Toast 提示，文字已复制到剪贴板，任意位置 Ctrl + V 直接粘贴。\n- \uD83D\uDDA5\uFE0F 后台全局生效：程序最小化到托盘后快捷键依然有效，在浏览器、文档等任意界面都能直接截图识别。\n- ⚡ 热键实现优化：采用 GetAsyncKeyState 轻量轮询方案，零注册、零冲突；轮询间隔 100ms，几乎无 CPU 开销。\n- \uD83E\uDDF9 代码维护：打包配置清理已删除的依赖项。\n- \uD83D\uDCD6 文档更新：README 增补截图文字识别功能说明，完善项目结构文档。",
   "downloadUrl": "https://wwanl.lanzoum.com/CivilServansTools",
   "mandatory": false
 }
