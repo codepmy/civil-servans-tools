@@ -24,10 +24,11 @@
 | 申论答题纸生成器 | 生成 25x24 标准格答题纸，支持按页和按题目字数导出 PDF / 图片 | [📖 使用说明](./tools/answer_sheet/docs/answer-sheet.md) |
 | PDF 文件拼合 | 多个 PDF 按序合并为一个，拖拽排序，一键生成 | [📖 使用说明](./tools/pdf_merger/docs/pdf-merger.md) |
 | OCR 文字识别 | 图片文字提取，支持印刷体/手写体，复制或导出 TXT | [📖 使用说明](./tools/ocr_recognizer/docs/ocr-recognizer.md) |
+| 截图文字识别 | 全局快捷键截屏选区，自动 OCR 识别并复制到剪贴板，快捷键可自定义 | — |
 
 ---
 
-## 🚀 五大核心功能
+## 🚀 六大核心功能
 
 ### 1. 📄 PDF 真题排版转换器（目前行测资料分析部分还存在一些缺陷）
 
@@ -83,6 +84,17 @@
 - **结果可复制**：一键复制全文到剪贴板，或导出为 TXT 文件
 - **拖放支持**：直接拖拽图片文件到窗口即可加载识别
 - 基于 **PaddleOCR 2.x + PaddlePaddle**，CUDA 可用时自动 GPU 加速
+
+### 6. ✂️ 快捷键截图文字识别
+
+无需打开任何窗口，在**任意软件界面**按下全局快捷键，框选屏幕区域后自动识别文字并复制到剪贴板。
+
+- **全局热键**：默认 `Ctrl + Shift + O`，基于 GetAsyncKeyState 轮询实现，零注册零冲突
+- **框选截图**：热键触发后拖拽框选屏幕任意区域（Esc 取消）
+- **自动识别**：识别完成后文字自动复制到剪贴板，右下角 Toast 提示结果
+- **快捷键可自定义**：菜单栏「截图OCR → 快捷键设置」修改组合键并自动保存
+- **手动触发**：菜单栏「截图OCR → 立即截图识别」随时调用，无需记忆快捷键
+- 复用 **PaddleOCR 2.x + PaddlePaddle** 引擎，首次使用需加载模型
 
 ---
 
@@ -151,7 +163,8 @@ CivilServantsTools/
 │   ├── exam_timer/         # 考试计时器
 │   ├── answer_sheet/       # 答题卡生成器
 │   ├── pdf_merger/         # PDF 文件拼合
-│   └── ocr_recognizer/     # OCR 文字识别工具
+│   ├── ocr_recognizer/     # OCR 文字识别工具
+│   └── screenshot_ocr/     # 快捷键截图文字识别
 ├── resources/styles/       # 全局样式（Slate + Indigo 设计系统）
 ├── sample_input/           # 示例 PDF
 └── output/                 # 输出目录

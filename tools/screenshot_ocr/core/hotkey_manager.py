@@ -85,7 +85,7 @@ class HotkeyManager(QObject):
         super().__init__(None)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll)
-        self._timer.setInterval(50)  # 50ms = 20 polls/sec
+        self._timer.setInterval(100)  # 100ms 轮询，GetAsyncKeyState 极轻量无开销
 
         self._mods: list[str] = []
         self._vk: int = 0
