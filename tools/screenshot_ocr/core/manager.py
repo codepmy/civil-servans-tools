@@ -24,8 +24,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "hotkey": {
         "modifiers": ["ctrl", "shift"],
-        "key":       "O",
-        "key_code":  79,
+        "key":       "Z",
+        "key_code":  90,
     },
 }
 

@@ -110,7 +110,7 @@ class HotkeySettingsDialog(QDialog):
 
     # 默认快捷键
     DEFAULT_MOD_LIST = ["ctrl", "shift"]
-    DEFAULT_KEY = "A"
+    DEFAULT_KEY = "Z"
 
     def __init__(
         self,

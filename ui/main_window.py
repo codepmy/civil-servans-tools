@@ -998,7 +998,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(desc)
 
         steps = QLabel(
-            "① 按下 <b>Ctrl + Shift + A</b> 启动截图<br>"
+            "① 按下 <b>Ctrl + Shift + Z</b> 启动截图<br>"
             "② 拖拽鼠标框选文字区域<br>"
             "③ 松开鼠标，识别结果自动复制<br>"
             "④ 在任意位置 <b>Ctrl + V</b> 粘贴"

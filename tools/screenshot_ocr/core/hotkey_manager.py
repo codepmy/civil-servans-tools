@@ -75,7 +75,7 @@ class HotkeyManager(QObject):
 
         mgr = HotkeyManager()
         mgr.hotkey_triggered.connect(on_hotkey)
-        mgr.start("ctrl", "shift", "O")
+        mgr.start("ctrl", "shift", "Z")
     """
 
     hotkey_triggered = pyqtSignal()
@@ -113,7 +113,7 @@ class HotkeyManager(QObject):
 
         Args:
             mod_list: 修饰键列表，如 ``["ctrl", "shift"]``。
-            key: 触发键名，如 ``"O"``。
+            key: 触发键名，如 ``"Z"``。
         """
         if self._active:
             self.stop()
