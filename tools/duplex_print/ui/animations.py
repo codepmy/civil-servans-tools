@@ -3,8 +3,8 @@
 用 QPainter + QTimer 逐帧绘制，循环演示两种打印机行为：
     - PaperExitDemo：纸张从打印机口滑出落到纸盘，展示出纸面朝上/朝下时
       用户看到的是"印好的一面"还是"纸的背面"。
-    - PaperFlipDemo：一叠纸绕长边（左右翻）/短边（上下翻）翻转，
-      展示翻转后文字方向是否颠倒。
+    - PaperFlipDemo：演示两种翻面方式（纸头不变 / 纸头调转），
+      展示反面文字与正面是同向还是相反。
 
 绘制逻辑独立为 paint_frame(painter, w, h, t)，便于离屏渲染自检。
 """
@@ -148,11 +148,17 @@ class PaperExitDemo(QWidget):
 
 
 class PaperFlipDemo(QWidget):
-    """演示一叠纸的翻面方式：左右翻（长边）/上下翻（短边）。"""
+    """演示一叠纸的两种翻面流程：左右反转（书式）/上下翻转（纸头调转）。
+
+    _rotate 表示工具是否需将反面页旋转 180°：
+        - True（默认推荐）：拿起纸叠左右反转（像翻书页）翻入纸盒——
+          放回时纸头被调转，需旋转反面页才能与正面同向。
+        - False：上下翻转（纸头调转）——放回后纸头归位，无需旋转。
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._short_edge = False
+        self._rotate = True
         self.setMinimumHeight(110)
         self.setStyleSheet(DEMO_BG_STYLE)
         self._timer = QTimer(self)
@@ -160,10 +166,10 @@ class PaperFlipDemo(QWidget):
         self._clock = QElapsedTimer()
         self._clock.start()
 
-    def set_short_edge(self, short_edge: bool):
+    def set_rotate(self, rotate: bool):
         """切换演示模式；模式变化时重置动画。"""
-        if self._short_edge != short_edge:
-            self._short_edge = short_edge
+        if self._rotate != rotate:
+            self._rotate = rotate
             self._clock.restart()
             self.update()
 
@@ -185,8 +191,10 @@ class PaperFlipDemo(QWidget):
     def paint_frame(self, p: QPainter, w: int, h: int, t: float):
         """绘制指定时刻 t（秒）的画面。
 
-        翻转用 2D 投影模拟 3D：绕垂直轴（左右翻）时水平方向缩放 |cosθ|，
-        绕水平轴（上下翻）时垂直方向缩放 |cosθ|；θ 过 π/2 时内容镜像。
+        翻转用 2D 投影模拟 3D：
+            - 左右反转（书式，绕前后轴）→ 水平方向缩放 |cosθ|；
+            - 上下翻转（纸头调转，绕左右轴）→ 垂直方向缩放 |cosθ|；
+        θ 过 π/2 时内容镜像。
         """
         # ---- 翻转相位：θ 在 0→π→0 间平滑往返，两端自然停顿 ----
         theta = math.pi * (1 - math.cos(2 * math.pi * t / 2.6)) / 2
@@ -205,20 +213,20 @@ class PaperFlipDemo(QWidget):
 
         p.save()
         p.translate(cx, cy)
-        if self._short_edge:
-            p.scale(1, scale)
+        if self._rotate:
+            p.scale(scale, 1)   # 左右反转（书式）：水平压缩
         else:
-            p.scale(scale, 1)
+            p.scale(1, scale)   # 上下翻转（纸头调转）：垂直压缩
         if mirrored:
-            if self._short_edge:
-                p.scale(1, -1)  # 上下翻：垂直镜像，纸叠顺序反转
+            if self._rotate:
+                p.scale(-1, 1)  # 书式翻：水平镜像
             else:
-                p.scale(-1, 1)  # 左右翻：水平镜像
+                p.scale(1, -1)  # 纸头调转：垂直镜像，纸叠顺序反转
         p.translate(-cx, -cy)
 
-        # 3 张纸：左右翻顺序不变；上下翻后纸叠顺序反转
+        # 3 张纸：书式翻顺序不变；纸头调转后纸叠顺序反转
         orders = [(0, 0), (off, off), (off * 2, off * 2)]
-        if mirrored and self._short_edge:
+        if mirrored and not self._rotate:
             orders = list(reversed(orders))
         for dx, dy in orders:
             _draw_sheet(p, bx + dx, by + dy, sheet_w, sheet_h, with_content=False)
@@ -236,9 +244,9 @@ class PaperFlipDemo(QWidget):
 
         # ---- 底部标注：翻转结果 ----
         p.setFont(_label_font())
-        if self._short_edge:
-            p.setPen(C_AMBER)
-            p.drawText(0, h - 4, "上下翻 · 短边 → 文字上下颠倒，工具已自动旋转 180°")
-        else:
+        if self._rotate:
             p.setPen(C_GREEN)
-            p.drawText(0, h - 4, "左右翻 · 长边 → 文字方向不变，无需旋转")
+            p.drawText(0, h - 4, "常见流程：拿起纸叠左右反转翻入纸盒 → 工具自动旋转反面页 180°，反面与正面同向")
+        else:
+            p.setPen(C_AMBER)
+            p.drawText(0, h - 4, "上下翻转（纸头调转）→ 反面页不旋转")

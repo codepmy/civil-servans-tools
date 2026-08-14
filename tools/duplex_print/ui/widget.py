@@ -214,7 +214,7 @@ class DuplexPrintWidget(QWidget):
         # 卡头：标题 + 当前选中值徽章
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
-        title = QLabel("🖨️ 打印机出纸方式" if kind == "out" else "🔄 翻面方式")
+        title = QLabel("🖨️ 打印机出纸方式" if kind == "out" else "🔄 反面文字方向")
         title.setStyleSheet(CARD_TITLE_STYLE)
         title_row.addWidget(title)
         title_row.addStretch()
@@ -240,17 +240,26 @@ class DuplexPrintWidget(QWidget):
             self.exit_demo = demo
             self.badge_out = badge
         else:
-            self.radio_long_edge = QRadioButton("左右翻 · 长边（文字方向不变）")
-            self.radio_long_edge.setStyleSheet(RADIO_STYLE)
-            self.radio_long_edge.setChecked(True)
-            self.radio_short_edge = QRadioButton("上下翻 · 短边（自动旋转 180°）")
-            self.radio_short_edge.setStyleSheet(RADIO_STYLE)
-            options_layout.addWidget(self.radio_long_edge)
-            options_layout.addWidget(self.radio_short_edge)
+            self.radio_same = QRadioButton("反面文字与正面同向（推荐）· 自动旋转反面页")
+            self.radio_same.setStyleSheet(RADIO_STYLE)
+            self.radio_same.setChecked(True)
+            self.radio_opposite = QRadioButton("反面文字与正面相反 · 反面页不旋转")
+            self.radio_opposite.setStyleSheet(RADIO_STYLE)
+            options_layout.addWidget(self.radio_same)
+            options_layout.addWidget(self.radio_opposite)
             demo = PaperFlipDemo()
             self.flip_demo = demo
             self.badge_flip = badge
         layout.addWidget(options)
+
+        # 翻面方向依赖打印机与翻面习惯，提示试打校准
+        if kind == "flip":
+            hint = QLabel("按动画演示翻面即可；若试打发现方向仍不对，切换上面的选项后重新生成")
+            hint.setStyleSheet(
+                "font-size: 11px; color: #B45309; background: transparent; border: none;"
+            )
+            hint.setWordWrap(True)
+            layout.addWidget(hint)
 
         # 动图演示
         layout.addWidget(demo, stretch=1)
@@ -347,8 +356,8 @@ class DuplexPrintWidget(QWidget):
         for radio in (
             self.radio_face_down,
             self.radio_face_up,
-            self.radio_long_edge,
-            self.radio_short_edge,
+            self.radio_same,
+            self.radio_opposite,
         ):
             radio.toggled.connect(self._on_options_changed)
 
@@ -445,7 +454,7 @@ class DuplexPrintWidget(QWidget):
 
     def _on_options_changed(self):
         self.exit_demo.set_face_down(self.radio_face_down.isChecked())
-        self.flip_demo.set_short_edge(self.radio_short_edge.isChecked())
+        self.flip_demo.set_rotate(self.radio_same.isChecked())
         self._refresh_preview()
         self._refresh_steps()
 
@@ -460,7 +469,7 @@ class DuplexPrintWidget(QWidget):
     def _refresh_preview(self):
         # 设置卡徽章：当前选中值
         self.badge_out.setText("面朝下" if self.radio_face_down.isChecked() else "面朝上")
-        self.badge_flip.setText("左右翻" if self.radio_long_edge.isChecked() else "上下翻")
+        self.badge_flip.setText("同向" if self.radio_same.isChecked() else "相反")
 
         if self._page_count <= 0:
             self.label_pages.setText("点击「选择 PDF」，或将 PDF 文件直接拖入此窗口，松开即加载")
@@ -473,7 +482,7 @@ class DuplexPrintWidget(QWidget):
 
         front, back = self._front_back_orders()
         rotate_note = ""
-        if self.radio_short_edge.isChecked() and back:
+        if self.radio_same.isChecked() and back:
             rotate_note = " · 每页旋转 180°"
         self.label_front_title.setText(f"正面 · {len(front)} 页")
         self.label_back_title.setText(f"反面 · {len(back)} 页{rotate_note}")
@@ -506,10 +515,10 @@ class DuplexPrintWidget(QWidget):
             return
 
         front, back = self._front_back_orders()
-        if self.radio_long_edge.isChecked():
-            flip_desc = "把整叠纸左右翻转（像翻书页），纸头方向不变，放回进纸盒"
+        if self.radio_same.isChecked():
+            flip_desc = "拿起整叠纸左右反转（像翻书页）后放回进纸盒（反面已自动旋转 180°）"
         else:
-            flip_desc = "把整叠纸上下翻转（纸头调转），反面已自动旋转，放回进纸盒"
+            flip_desc = "把整叠纸上下翻转（纸头调转）后放回进纸盒（反面不旋转）"
         if not back:
             flip_desc = "（无需翻面）"
 
@@ -524,7 +533,8 @@ class DuplexPrintWidget(QWidget):
         if back:
             steps += (
                 "<br><br><span style='color:#9CA3AF;'>"
-                "小贴士：首次使用建议先用 2 页的小文档试打核对方向。"
+                "小贴士：首次使用建议先试打 2 页核对，"
+                "若反面文字颠倒，切换「反面文字方向」后重新生成。"
                 "</span>"
             )
         else:
@@ -571,7 +581,7 @@ class DuplexPrintWidget(QWidget):
             front_bytes, back_bytes = DuplexReorderer().reorder(
                 self._src_path,
                 face_down=self.radio_face_down.isChecked(),
-                flip_short_edge=self.radio_short_edge.isChecked(),
+                flip_short_edge=self.radio_same.isChecked(),
             )
             with open(front_path, "wb") as f:
                 f.write(front_bytes)
