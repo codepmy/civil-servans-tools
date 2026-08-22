@@ -249,6 +249,16 @@ if __name__ == "__main__":
 _cached_system_python: str | None = None
 
 
+def _no_window_flags() -> int:
+    """Windows 下抑制子进程控制台窗口。
+
+    打包为 windowed exe（console=False）后，父进程没有控制台；
+    若不带 CREATE_NO_WINDOW，subprocess 启动 python.exe 时
+    Windows 会新建一个可见的黑窗口，闪几秒后消失。
+    """
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _find_system_python() -> str | None:
     """Return path to a system Python executable, or *None*."""
     global _cached_system_python
@@ -260,6 +270,7 @@ def _find_system_python() -> str | None:
             result = subprocess.run(
                 [cmd, "-c", "import sys; print(sys.executable)"],
                 capture_output=True, text=True, timeout=10,
+                creationflags=_no_window_flags(),
             )
             if result.returncode == 0:
                 exe = result.stdout.strip()
@@ -327,7 +338,7 @@ class PaddleRecognizer(BaseRecognizer):
             f.write(_SUBPROCESS_SCRIPT)
 
         try:
-            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            creationflags = _no_window_flags()
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
@@ -470,6 +481,7 @@ class PaddleRecognizer(BaseRecognizer):
                  "] if not hasattr(_n,a)];"
                  "import paddle; from paddleocr import PaddleOCR"],
                 capture_output=True, text=True, timeout=60,
+                creationflags=_no_window_flags(),
             )
         except Exception as exc:
             return (

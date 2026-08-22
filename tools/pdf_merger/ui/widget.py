@@ -117,6 +117,12 @@ DEFAULT_LIST = (
     "}"
 )
 
+# 空闲态（无文件）样式：灰色虚线边框提示"可拖放文件到此处"
+IDLE_LIST = DEFAULT_LIST.replace(
+    "  border: none;",
+    "  border: 2px dashed #D1D5DB;\n  border-radius: 8px;",
+)
+
 PREVIEW_BG = (
     "QScrollArea {"
     "  border: none;"
@@ -157,9 +163,21 @@ class DropListWidget(QListWidget):
         self.setDragDropMode(QListWidget.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.setStyleSheet(DEFAULT_LIST)
+        self._has_files = False
+        self.setStyleSheet(IDLE_LIST)
         self.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self._external_pdf_drag = False
+
+    def set_has_files(self, has_files: bool):
+        """由外部在文件列表变化时调用，切换空闲/已装载样式。"""
+        self._has_files = has_files
+        if not self._external_pdf_drag:
+            self.setStyleSheet(DEFAULT_LIST if has_files else IDLE_LIST)
+
+    def _restore_idle_style(self):
+        """恢复非拖拽状态下的样式（空闲虚线或已装载实线）。"""
+        if not self._external_pdf_drag:
+            self.setStyleSheet(DEFAULT_LIST if self._has_files else IDLE_LIST)
 
     def dragEnterEvent(self, event: QDragEnterEvent | None):
         if event is None:
@@ -170,7 +188,7 @@ class DropListWidget(QListWidget):
             event.acceptProposedAction()
         else:
             self._external_pdf_drag = False
-            self.setStyleSheet(DEFAULT_LIST)
+            self._restore_idle_style()
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event: QDragMoveEvent | None):
@@ -181,11 +199,12 @@ class DropListWidget(QListWidget):
 
     def dragLeaveEvent(self, event):
         self._external_pdf_drag = False
-        self.setStyleSheet(DEFAULT_LIST)
+        self._restore_idle_style()
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent | None):
-        self.setStyleSheet(DEFAULT_LIST)
+        self._external_pdf_drag = False
+        self._restore_idle_style()
         if self._external_pdf_drag and event and event.mimeData():
             paths = [
                 url.toLocalFile()
@@ -989,6 +1008,7 @@ class PdfMergerWidget(QWidget):
         self.btn_save.setStyleSheet(SECONDARY_BTN)
 
         self._drop_hint.setVisible(not has_files)
+        self.list_widget.set_has_files(has_files)
 
         if has_files:
             self._count_badge.setText(f"{count} 个文件")  # N 个文件

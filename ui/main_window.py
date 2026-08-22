@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
+from PyQt6.QtGui import QAction, QDesktopServices, QFontMetrics, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -50,6 +51,7 @@ from tools.duplex_print.ui.widget import DuplexPrintWidget
 from tools.ocr_recognizer.ui.recognizer_widget import OCRRecognizerWidget
 from tools.screenshot_ocr.core.manager import ScreenshotOCRManager
 from tools.screenshot_ocr.ui.hotkey_settings import HotkeySettingsDialog
+from tools.mistake_book.ui.widget import MistakeBookWidget
 
 
 DEFAULT_APP_METADATA = {
@@ -223,6 +225,7 @@ class MainWindow(QMainWindow):
         self.pdf_merger_page = PdfMergerWidget()
         self.duplex_print_page = DuplexPrintWidget()
         self.ocr_recognizer_page = OCRRecognizerWidget()
+        self.mistake_book_page = MistakeBookWidget()
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.pdf_tool_page)
         self.stack.addWidget(self.timer_tool_page)
@@ -230,6 +233,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.pdf_merger_page)
         self.stack.addWidget(self.duplex_print_page)
         self.stack.addWidget(self.ocr_recognizer_page)
+        self.stack.addWidget(self.mistake_book_page)
         self.setCentralWidget(self.stack)
 
         self.status_bar = QStatusBar()
@@ -346,6 +350,12 @@ class MainWindow(QMainWindow):
             ("🔍", "OCR文字识别",
              "图片文字提取，支持印刷体/手写体，复制或导出 TXT",
              self._show_ocr_recognizer),
+            ("📔", "错题本",
+             "记录错题、打标签备注，支持粘贴截图，随时回顾",
+             self._show_mistake_book),
+            ("🔒", "更多工具",
+             "其它功能持续开发中，敬请期待",
+             None),  # 占位卡：凑齐 2 列网格，保持布局整齐
         ]
 
         active_grid = QGridLayout()
@@ -353,6 +363,13 @@ class MainWindow(QMainWindow):
         active_grid.setVerticalSpacing(16)
         for i, (icon, name, desc, handler) in enumerate(active_tools):
             card = self._make_tool_card(icon, name, desc, handler)
+            if handler is None:
+                card.setEnabled(False)
+                # 禁用后按钮变灰，内部文字标签需同步变灰（内联样式优先于 QSS）
+                for label in card.findChildren(QLabel):
+                    label.setStyleSheet(
+                        label.styleSheet().replace("#1F2937", "#B0B7C3")
+                    )
             row, col = divmod(i, 2)
             active_grid.addWidget(card, row, col)
         content_layout.addLayout(active_grid)
@@ -388,7 +405,16 @@ class MainWindow(QMainWindow):
         footer.setStyleSheet("font-size: 12px; padding-top: 24px; background: transparent;")
         content_layout.addWidget(footer)
 
-        outer.addWidget(content, stretch=1)
+        # 内容区套滚动容器：窗口高度不足时滚动查看，保证卡片不被压缩裁字
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(
+            "QScrollArea { background-color: #F8F7F4; border: none; }"
+            "QScrollArea > QWidget > QWidget { background-color: #F8F7F4; }"
+        )
+        outer.addWidget(scroll, stretch=1)
 
         return page
 
@@ -398,17 +424,17 @@ class MainWindow(QMainWindow):
         """创建统一风格的工具卡片按钮。"""
         btn = QPushButton()
         btn.setObjectName("tool-card")
-        btn.setMinimumHeight(110)
+        btn.setMinimumHeight(104)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # 用 QVBoxLayout 在按钮内放置图标 + 标题 + 描述
         inner = QVBoxLayout()
-        inner.setContentsMargins(22, 18, 22, 18)
-        inner.setSpacing(6)
+        inner.setContentsMargins(22, 14, 22, 14)
+        inner.setSpacing(4)
 
         icon_label = QLabel(icon)
         icon_label.setStyleSheet(
-            "font-size: 26px; background: transparent; border: none; padding: 0;"
+            "font-size: 22px; background: transparent; border: none; padding: 0;"
         )
         inner.addWidget(icon_label)
 
@@ -419,8 +445,13 @@ class MainWindow(QMainWindow):
         )
         inner.addWidget(name_label)
 
-        desc_label = QLabel(desc)
-        desc_label.setWordWrap(True)
+        # 描述单行显示，超长省略号，避免高度不足时文字被裁
+        desc_label = QLabel()
+        desc_label.setTextFormat(Qt.TextFormat.PlainText)
+        metrics = QFontMetrics(desc_label.font())
+        desc_label.setText(
+            metrics.elidedText(desc, Qt.TextElideMode.ElideRight, 500)
+        )
         desc_label.setStyleSheet(
             "font-size: 12px; color: #9CA3AF; background: transparent; border: none; padding: 0;"
         )
@@ -428,7 +459,8 @@ class MainWindow(QMainWindow):
 
         inner.addStretch()
         btn.setLayout(inner)
-        btn.clicked.connect(handler)
+        if handler is not None:
+            btn.clicked.connect(handler)
         btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         return btn
 
@@ -489,6 +521,11 @@ class MainWindow(QMainWindow):
         self.toolbar.hide()
         self.status_bar.showMessage("手动双面打印 - 选择PDF并设置出纸与翻面方式")
 
+    def _show_mistake_book(self):
+        self.stack.setCurrentWidget(self.mistake_book_page)
+        self.toolbar.hide()
+        self.status_bar.showMessage("错题本 - 添加或回顾错题")
+
     def _connect_signals(self):
         self.toolbar.home_clicked.connect(self._show_home)
         self.toolbar.open_clicked.connect(self._on_open)
@@ -507,6 +544,8 @@ class MainWindow(QMainWindow):
         self.ocr_recognizer_page.back_requested.connect(self._show_home)
         self.ocr_recognizer_page.status_message.connect(self._show_ocr_status)
         self.ocr_recognizer_page.install_deps_requested.connect(self._run_setup_bat)
+        self.mistake_book_page.back_requested.connect(self._show_home)
+        self.mistake_book_page.status_message.connect(self._show_mistake_book_status)
 
     def _on_batch(self):
         dialog = BatchDialog(self._fonts, self)
@@ -526,6 +565,10 @@ class MainWindow(QMainWindow):
 
     def _show_ocr_status(self, message: str):
         if self.stack.currentWidget() == self.ocr_recognizer_page:
+            self.status_bar.showMessage(message)
+
+    def _show_mistake_book_status(self, message: str):
+        if self.stack.currentWidget() == self.mistake_book_page:
             self.status_bar.showMessage(message)
 
     def _open_author_email(self, _link: str = ""):

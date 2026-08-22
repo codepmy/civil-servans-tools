@@ -11,3 +11,12 @@ output/*
 .idea/
 .vscode/
 *.log
+
+# 本地运行产物 / 用户配置（不提交）
+user_config.json
+mistake_book.json
+mistake_book.json.user_bak
+mistake_images/
+news_cache.json
+.claude/
+*.pdf

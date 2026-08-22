@@ -137,7 +137,7 @@ QPushButton#tool-card {
     background-color: #FFFFFF;
     border: 1px solid #E5E7EB;
     border-radius: 12px;
-    padding: 22px 20px;
+    min-height: 104px;
     font-size: 14px;
     font-weight: 600;
     color: #1F2937;

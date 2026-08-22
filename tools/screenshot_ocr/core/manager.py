@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import json
+import threading
 import traceback
 from typing import Any
 
 import numpy as np
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from app_paths import user_config_path
@@ -29,6 +30,14 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     },
 }
 
+# OCR 引擎预热相关常量
+_WARMUP_DELAY_MS = 3000     # 启动后延迟多久开始预热（避开程序启动资源高峰）
+_WARMUP_WAIT_S = 90         # 截图时等待预热完成的上限（首次冷加载模型约 10-30s）
+# 预热状态: idle(未开始) → warming(进行中) → ready | failed
+_ENGINE_IDLE, _ENGINE_WARMING, _ENGINE_READY, _ENGINE_FAILED = (
+    "idle", "warming", "ready", "failed"
+)
+
 
 class ScreenshotOCRManager(QObject):
     """截图 OCR 流程编排器。"""
@@ -43,6 +52,10 @@ class ScreenshotOCRManager(QObject):
         self._engine = None
         self._overlay: ScreenshotOverlay | None = None
         self._worker: ScreenshotOCRWorker | None = None
+        # 引擎预热状态机（threading.Condition 保护，预热线程与主线程共享）
+        self._engine_cond = threading.Condition()
+        self._engine_state = _ENGINE_IDLE
+        self._warmup_thread: threading.Thread | None = None
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -55,15 +68,26 @@ class ScreenshotOCRManager(QObject):
         self._hotkey_mgr.hotkey_triggered.connect(self._on_hotkey)
         self._hotkey_mgr.start(mod_list, key)
 
+        # 延迟后台预热 OCR 引擎，避免首次截图时冷启动卡顿
+        QTimer.singleShot(_WARMUP_DELAY_MS, self._start_warmup)
+
     def shutdown(self) -> None:
-        """关闭管理器：停止轮询 + 清理 OCR 引擎。"""
+        """关闭管理器：停止轮询 + 清理 OCR 引擎（含预热中的引擎）。"""
         self._hotkey_mgr.stop()
-        if self._engine is not None:
+        engine = None
+        with self._engine_cond:
+            if self._engine_state == _ENGINE_WARMING:
+                # 预热中：短等收尾；未完成则交给 daemon 线程自行释放
+                #（其子进程 stdin 断开后自动退出，不阻塞程序退出）
+                self._engine_cond.wait(timeout=5)
+            engine = self._engine
+            self._engine = None
+            self._engine_state = _ENGINE_IDLE
+        if engine is not None:
             try:
-                self._engine.close()
+                engine.close()
             except Exception:
                 pass
-            self._engine = None
 
     def trigger(self) -> None:
         """手动触发截图 OCR 流程。"""
@@ -160,14 +184,83 @@ class ScreenshotOCRManager(QObject):
 
     # ── Engine singleton ────────────────────────────────────────────
 
-    def _get_engine(self):
-        if self._engine is None:
+    def _start_warmup(self) -> None:
+        """启动后台预热线程（幂等，仅在 idle 时生效）。"""
+        with self._engine_cond:
+            if self._engine_state != _ENGINE_IDLE:
+                return
+            self._engine_state = _ENGINE_WARMING
+        self._warmup_thread = threading.Thread(
+            target=self._warmup_worker, name="socr-warmup", daemon=True
+        )
+        self._warmup_thread.start()
+
+    def _warmup_worker(self) -> None:
+        """预热线程：探测环境 → 拉起 OCR 子进程 → 加载模型。
+
+        全程在后台线程执行（subprocess IO 阻塞，不占用 UI 线程）。
+        """
+        engine = None
+        ok = False
+        try:
             from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
-            ok, reason = PaddleRecognizer.is_available()
-            if not ok:
-                raise RuntimeError("OCR 环境未就绪，请先安装依赖。\n\n" + reason)
-            self._engine = PaddleRecognizer(handwritten=False)
-        return self._engine
+            ok, _reason = PaddleRecognizer.is_available()
+            if ok:
+                engine = PaddleRecognizer(handwritten=False)
+                engine.warm_up()
+        except Exception:
+            ok = False  # 异常视为失败，交给同步兜底给出友好报错
+
+        with self._engine_cond:
+            if self._engine_state != _ENGINE_WARMING:
+                # 已被同步兜底接管或已 shutdown → 放弃本次预热结果
+                if engine is not None:
+                    try:
+                        engine.close()
+                    except Exception:
+                        pass
+            elif not ok:
+                # 预热失败：状态置 failed，首次截图时同步兜底会重试并给出友好报错
+                self._engine_state = _ENGINE_FAILED
+                if engine is not None:
+                    try:
+                        engine.close()
+                    except Exception:
+                        pass
+            else:
+                self._engine = engine
+                self._engine_state = _ENGINE_READY
+            self._engine_cond.notify_all()
+        self._warmup_thread = None
+
+    def _get_engine(self):
+        with self._engine_cond:
+            if self._engine_state == _ENGINE_READY:
+                return self._engine
+            if self._engine_state == _ENGINE_WARMING:
+                # 首次冷加载模型约 10-30s，给用户明确提示后等待
+                Toast.show_message(
+                    "OCR 引擎首次加载中，请稍候…", variant="warning", duration_ms=4000
+                )
+                self._engine_cond.wait(timeout=_WARMUP_WAIT_S)
+                if self._engine_state == _ENGINE_READY:
+                    return self._engine
+                # 超时或失败 → 置回 idle，走下方同步兜底
+                self._engine_state = _ENGINE_IDLE
+            elif self._engine_state == _ENGINE_FAILED:
+                # 预热失败 → 允许同步重试一次（兜底）
+                self._engine_state = _ENGINE_IDLE
+
+        # 同步兜底（与预热前的原逻辑一致）
+        from tools.ocr_engine.paddle_recognizer import PaddleRecognizer
+        ok, reason = PaddleRecognizer.is_available()
+        if not ok:
+            raise RuntimeError("OCR 环境未就绪，请先安装依赖。\n\n" + reason)
+        engine = PaddleRecognizer(handwritten=False)
+        with self._engine_cond:
+            self._engine = engine
+            self._engine_state = _ENGINE_READY
+        return engine
 
     # ── Config I/O ──────────────────────────────────────────────────
 

@@ -17,6 +17,10 @@ DRAG_BORDER_STYLE = (
 NO_DRAG_BORDER_STYLE = (
     "QScrollArea { border: 2px dashed #EF4444; border-radius: 6px; background-color: #FEF2F2; }"
 )
+# 空闲态（未加载文件）样式：灰色虚线边框提示"可拖放文件到此处"
+IDLE_DROP_STYLE = (
+    "QScrollArea { border: 2px dashed #D1D5DB; border-radius: 6px; background-color: #F3F4F6; }"
+)
 DEFAULT_BORDER_STYLE = (
     "QScrollArea { border: 1px solid #E5E7EB; "
     "border-radius: 4px; background-color: #F3F4F6; }"
@@ -130,6 +134,7 @@ class PDFPreviewWidget(QWidget):
             self._current_page = 0
             self._render_current_page()
             self._update_nav()
+            self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
         except Exception as e:
             self.image_label.setText(f"无法加载PDF:\n{e}")
 
@@ -142,6 +147,7 @@ class PDFPreviewWidget(QWidget):
             self._current_page = 0
             self._render_current_page()
             self._update_nav()
+            self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
         except Exception as e:
             self.image_label.setText(f"预览加载失败\n(可保存后查看)")
 
@@ -226,6 +232,18 @@ class PDFPreviewWidget(QWidget):
         self.setAcceptDrops(enabled)
         if enabled and not self._doc:
             self.image_label.setText("请打开PDF文件\n\n或拖入PDF文件到此处")
+            self.scroll_area.setStyleSheet(IDLE_DROP_STYLE)
+        elif not enabled and not self._doc:
+            self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
+
+    def _restore_scroll_style(self):
+        """恢复非拖拽状态样式：未加载文件时虚线提示，已加载恢复实线。"""
+        if self._doc is not None:
+            self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
+        elif self._accept_drops:
+            self.scroll_area.setStyleSheet(IDLE_DROP_STYLE)
+        else:
+            self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
 
     # ── drag & drop ──────────────────────────────────────────────
 
@@ -264,11 +282,11 @@ class PDFPreviewWidget(QWidget):
 
     def dragLeaveEvent(self, event: QDragLeaveEvent | None):
         self._drag_over = False
-        self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
+        self._restore_scroll_style()
 
     def dropEvent(self, event: QDropEvent | None):
         self._drag_over = False
-        self.scroll_area.setStyleSheet(DEFAULT_BORDER_STYLE)
+        self._restore_scroll_style()
         if not self._accept_drops or not event or not event.mimeData():
             return
         for url in event.mimeData().urls():
@@ -292,6 +310,7 @@ class PDFPreviewWidget(QWidget):
         self.btn_next.setEnabled(False)
         self.input_jump_page.clear()
         self.label_page.setText(" / — 页")
+        self._restore_scroll_style()
 
 
 class PreviewPanel(QWidget):
