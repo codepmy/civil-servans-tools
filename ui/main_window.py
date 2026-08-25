@@ -50,8 +50,8 @@ from tools.pdf_merger.ui.widget import PdfMergerWidget
 from tools.duplex_print.ui.widget import DuplexPrintWidget
 from tools.ocr_recognizer.ui.recognizer_widget import OCRRecognizerWidget
 from tools.screenshot_ocr.core.manager import ScreenshotOCRManager
-from tools.screenshot_ocr.ui.hotkey_settings import HotkeySettingsDialog
 from tools.mistake_book.ui.widget import MistakeBookWidget
+from tools.settings.ui.settings_dialog import SettingsDialog
 
 
 DEFAULT_APP_METADATA = {
@@ -151,8 +151,9 @@ class UpdateCheckWorker(QThread):
 class MainWindow(QMainWindow):
     """Main application window: home page plus tool detail pages."""
 
-    def __init__(self):
+    def __init__(self, autostart_mode: bool = False):
         super().__init__()
+        self._autostart_mode = autostart_mode
         self._input_path: str | None = None
         self._output_bytes: bytes | None = None
         self._worker: ConversionWorker | None = None
@@ -174,10 +175,12 @@ class MainWindow(QMainWindow):
 
         self._setup_ui()
         self._connect_signals()
-        QTimer.singleShot(800, lambda: self._check_updates(silent=True))
+        # 自启动模式（开机后台运行）跳过弹窗类初始化：更新检查与新功能引导
+        if not self._autostart_mode:
+            QTimer.singleShot(800, lambda: self._check_updates(silent=True))
+            QTimer.singleShot(1500, self._maybe_show_socr_intro)
         self._init_screenshot_ocr()
         self._init_tray_icon()
-        QTimer.singleShot(1500, self._maybe_show_socr_intro)
 
     def _setup_ui(self):
         menubar = self.menuBar()
@@ -206,10 +209,12 @@ class MainWindow(QMainWindow):
         self.action_screenshot_ocr = QAction("立即截图识别", self)
         self.action_screenshot_ocr.triggered.connect(self._trigger_screenshot_ocr)
         socr_menu.addAction(self.action_screenshot_ocr)
-        socr_menu.addSeparator()
-        self.action_hotkey_settings = QAction("快捷键设置...", self)
-        self.action_hotkey_settings.triggered.connect(self._show_hotkey_settings)
-        socr_menu.addAction(self.action_hotkey_settings)
+
+        # 设置 — 紧挨着"截图OCR"右侧（快捷键、自启动等统一收纳在此）
+        settings_menu = menubar.addMenu("设置")
+        self.action_settings = QAction("设置...", self)
+        self.action_settings.triggered.connect(self._show_settings_dialog)
+        settings_menu.addAction(self.action_settings)
 
         self.toolbar = MainToolbar()
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
@@ -1111,16 +1116,18 @@ class MainWindow(QMainWindow):
         dialog.finished.connect(_on_dismiss)  # 也处理关闭按钮
         dialog.show()  # 非模态 — 不阻塞用户操作
 
-    def _show_hotkey_settings(self) -> None:
-        """打开快捷键设置对话框。"""
+    def _show_settings_dialog(self) -> None:
+        """打开统一设置对话框（截图OCR快捷键 / 开机自启动 / 关闭窗口行为）。"""
         if self._socr_mgr is None:
             return
-        dlg = HotkeySettingsDialog(
-            current_mod_list=self._socr_mgr.current_mod_list(),
-            current_key=self._socr_mgr.current_key_name(),
+        dlg = SettingsDialog(
+            initial_mod_list=self._socr_mgr.current_mod_list(),
+            initial_key=self._socr_mgr.current_key_name(),
+            initial_close_action=self._load_close_action(),
+            on_hotkey_changed=self._socr_mgr.set_hotkey,
+            on_close_action_changed=self._save_close_action,
             parent=self,
         )
-        dlg.hotkey_changed.connect(self._socr_mgr.set_hotkey)
         dlg.exec()
 
     def _on_socr_status(self, message: str) -> None:
@@ -1148,9 +1155,9 @@ class MainWindow(QMainWindow):
         action_show.triggered.connect(self._show_from_tray)
         tray_menu.addAction(action_show)
 
-        action_hotkey = QAction("快捷键设置...", self)
-        action_hotkey.triggered.connect(self._show_hotkey_settings)
-        tray_menu.addAction(action_hotkey)
+        action_settings = QAction("⚙️ 设置...", self)
+        action_settings.triggered.connect(self._show_settings_dialog)
+        tray_menu.addAction(action_settings)
 
         tray_menu.addSeparator()
 
