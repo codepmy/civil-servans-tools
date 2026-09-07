@@ -179,7 +179,7 @@ class XingceCleaner:
     @staticmethod
     def _extract_positioned_lines(page) -> list[tuple[str, float, float]]:
         page_dict = page.get_text("rawdict", sort=False)
-        lines: list[tuple[str, float, float]] = []
+        raw_lines: list[tuple[str, float, float, float]] = []
         for block in page_dict.get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -190,10 +190,52 @@ class XingceCleaner:
                     continue
                 bbox = line.get("bbox", (0, 0, 0, 0))
                 x_mm = bbox[0] * 25.4 / 72
-                y_mm = bbox[1] * 25.4 / 72
-                lines.append((text, y_mm, x_mm))
+                y0_mm = bbox[1] * 25.4 / 72
+                y1_mm = bbox[3] * 25.4 / 72
+                raw_lines.append((text, x_mm, y0_mm, y1_mm))
+        lines = XingceCleaner._merge_visual_lines(raw_lines)
         lines.sort(key=lambda item: (round(item[1], 1), item[2]))
         return lines
+
+    @staticmethod
+    def _merge_visual_lines(
+        raw_lines: list[tuple[str, float, float, float]],
+    ) -> list[tuple[str, float, float]]:
+        """Merge rawdict lines that belong to the same visual row.
+
+        Some PDFs (e.g. 逻辑填空 practice sets from 花生十三) place every
+        option word as a separate text object with slightly offset
+        baselines, so PyMuPDF splits one visual row into several
+        rawdict lines like "A．犹豫不决" / "泥古不化" / "B．左顾右盼" /
+        "听之任之". Sorting such lines by y alone interleaves the words
+        (A B A2 B2) and downstream the wrong words get appended to the
+        wrong option. Rebuild visual rows first: lines whose y-ranges
+        overlap substantially are one row; within a row, fragments are
+        joined left-to-right with spaces.
+        """
+        if not raw_lines:
+            return []
+        # Greedy clustering by y: each new fragment joins the first row
+        # whose representative line overlaps it substantially.
+        rows: list[list[tuple[str, float, float, float]]] = []
+        for frag in sorted(raw_lines, key=lambda r: (r[2], r[3])):
+            for row in rows:
+                rep = row[0]
+                rep_h = max(rep[3] - rep[2], 0.5)
+                frag_h = max(frag[3] - frag[2], 0.5)
+                overlap = min(rep[3], frag[3]) - max(rep[2], frag[2])
+                if overlap > 0.5 * min(rep_h, frag_h):
+                    row.append(frag)
+                    break
+            else:
+                rows.append([frag])
+
+        merged: list[tuple[str, float, float]] = []
+        for row in rows:
+            row.sort(key=lambda r: r[1])
+            text = " ".join(frag[0] for frag in row)
+            merged.append((text, min(frag[2] for frag in row), row[0][1]))
+        return merged
 
     @staticmethod
     def _join_line_chars(line: dict) -> str:
