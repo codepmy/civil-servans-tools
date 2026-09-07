@@ -356,7 +356,7 @@ class MainWindow(QMainWindow):
              "图片文字提取，支持印刷体/手写体，复制或导出 TXT",
              self._show_ocr_recognizer),
             ("📔", "错题本",
-             "记录错题、打标签备注，支持粘贴截图，随时回顾",
+             "记录错题、写标题、打标签，支持粘贴截图，随时回顾",
              self._show_mistake_book),
             ("🔒", "更多工具",
              "其它功能持续开发中，敬请期待",
