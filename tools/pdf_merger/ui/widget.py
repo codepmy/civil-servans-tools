@@ -203,21 +203,22 @@ class DropListWidget(QListWidget):
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent | None):
+        # 先读标志再清零: 清零要放在读取之前会把下面的外部文件分支变成死代码,
+        # 外部拖放的 PDF 会静默丢掉(既不入列, 也不报错)。
+        is_external = self._external_pdf_drag
         self._external_pdf_drag = False
         self._restore_idle_style()
-        if self._external_pdf_drag and event and event.mimeData():
+        if is_external and event and event.mimeData():
             paths = [
                 url.toLocalFile()
                 for url in event.mimeData().urls()
                 if url.isLocalFile()
                 and Path(url.toLocalFile()).suffix.lower() == ".pdf"
             ]
-            self._external_pdf_drag = False
             if paths:
                 self.files_added.emit(paths)
                 event.acceptProposedAction()
                 return
-        self._external_pdf_drag = False
         super().dropEvent(event)
         self.order_changed.emit()
 
@@ -268,6 +269,8 @@ class DropListWidget(QListWidget):
 
 class FileItemWidget(QWidget):
     """File row: index + filename + metadata + page range controls."""
+
+    range_changed = pyqtSignal()  # 页数范围改动, 用于刷新右侧预览
 
     def __init__(self, index: int, filename: str, page_count: int, file_size: int, parent=None):
         super().__init__(parent)
@@ -395,11 +398,13 @@ class FileItemWidget(QWidget):
 
     def _on_start_changed(self, value: int):
         if self._spin_end and value > self._spin_end.value():
-            self._spin_end.setValue(value)
+            self._spin_end.setValue(value)  # 会连带触发 _on_end_changed 的发信号
+        self.range_changed.emit()
 
     def _on_end_changed(self, value: int):
         if self._spin_start and value < self._spin_start.value():
             self._spin_start.setValue(value)
+        self.range_changed.emit()
 
 
 # ============================================================
@@ -412,8 +417,10 @@ class PdfPreviewPanel(QWidget):
     def __init__(self):
         super().__init__()
         self._doc: fitz.Document | None = None
+        self._doc_path: str | None = None
         self._current_page: int = 0
         self._pixmap: QPixmap | None = None
+        self._range: tuple[int, int] = (1, 0)  # 预览覆盖的页范围(1-indexed, 闭区间)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -494,25 +501,39 @@ class PdfPreviewPanel(QWidget):
         if self._pixmap and not self._pixmap.isNull():
             self._fit_to_view()
 
-    def show_file(self, path: str):
+    def show_file(self, path: str, page_range: tuple[int, int] | None = None):
+        """预览 path。page_range 为拼合时选定的页范围(1-indexed, 闭区间)。
+
+        预览只覆盖该范围: 翻页不会越出, 也不能翻到范围外的页 —— 否则
+        用户看到的和实际拼合出来的不是同一份内容。
+        """
+        # 同一个文件只更新范围: 调页数微调框会连续触发, 每次重开文档
+        # 大文件时会明显卡顿
+        if self._doc is not None and self._doc_path == path:
+            self._apply_range(page_range)
+            return
+
         if self._doc:
             self._doc.close()
-            self._doc = None
+        self._doc = None
+        self._doc_path = None
         self._current_page = 0
         self._pixmap = None
+        self._range = (1, 0)
 
         try:
             file_path = Path(path)
             file_size = file_path.stat().st_size
 
             self._doc = fitz.open(str(file_path))
+            self._doc_path = path
             if self._doc.page_count == 0:
                 self._show_placeholder_text()
                 self._update_nav()
                 self.label_file_info.setText("0 页")
                 return
 
-            self._render_current_page()
+            self._apply_range(page_range)
 
             size_mb = file_size / (1024 * 1024)
             if size_mb >= 1.0:
@@ -525,14 +546,34 @@ class PdfPreviewPanel(QWidget):
             self._show_placeholder_text()
             self.label_file_info.setText("加载失败")
             self._doc = None
+            self._doc_path = None
+            self._range = (1, 0)
             self._update_nav()
+
+    def _apply_range(self, page_range: tuple[int, int] | None):
+        """把选定的页范围夹到实际页数内, 并保证当前页落在范围内。"""
+        total = self._doc.page_count if self._doc else 0
+        if total == 0:
+            self._range = (1, 0)
+            return
+        if page_range is None:
+            start, end = 1, total
+        else:
+            start = max(1, min(page_range[0], total))
+            end = max(start, min(page_range[1], total))
+        self._range = (start, end)
+        if not (start <= self._current_page + 1 <= end):
+            self._current_page = start - 1
+        self._render_current_page()
 
     def clear(self):
         if self._doc:
             self._doc.close()
             self._doc = None
+        self._doc_path = None
         self._current_page = 0
         self._pixmap = None
+        self._range = (1, 0)
         self._show_placeholder_text()
         self.label_file_info.setText("")
         self._update_nav()
@@ -568,20 +609,26 @@ class PdfPreviewPanel(QWidget):
     def _update_nav(self):
         has_doc = bool(self._doc and self._doc.page_count)
         total = self._doc.page_count if has_doc else 0
-        self.btn_prev.setEnabled(has_doc and self._current_page > 0)
-        self.btn_next.setEnabled(has_doc and self._current_page < total - 1)
+        start, end = self._range if has_doc else (1, 0)
+        # 翻页边界取"选定范围"而非整本页数
+        self.btn_prev.setEnabled(has_doc and self._current_page > start - 1)
+        self.btn_next.setEnabled(has_doc and self._current_page < end - 1)
         if has_doc:
-            self.label_page.setText(f"第 {self._current_page + 1} / {total} 页")  # 第 X / N 页
+            text = f"第 {self._current_page + 1} / {total} 页"  # 第 X / N 页
+            if (start, end) != (1, total):
+                # 页码用原文档的绝对页号, 另标出本次拼合选中的区间
+                text += f"（拼合 {start}-{end}）"
+            self.label_page.setText(text)
         else:
             self.label_page.setText("- / -")
 
     def _prev_page(self):
-        if self._doc and self._current_page > 0:
+        if self._doc and self._current_page > self._range[0] - 1:
             self._current_page -= 1
             self._render_current_page()
 
     def _next_page(self):
-        if self._doc and self._current_page < self._doc.page_count - 1:
+        if self._doc and self._current_page < self._range[1] - 1:
             self._current_page += 1
             self._render_current_page()
 
@@ -908,6 +955,7 @@ class PdfMergerWidget(QWidget):
             item.setData(Qt.ItemDataRole.UserRole + 1, widget)
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
+            widget.range_changed.connect(self._on_range_changed)
 
             existing.add(p)
             added += 1
@@ -974,11 +1022,36 @@ class PdfMergerWidget(QWidget):
         self.btn_up.setEnabled(has_selection and row > 0)
         self.btn_down.setEnabled(has_selection and row < self.list_widget.count() - 1)
 
-        if has_selection:
-            path = selected[0].data(Qt.ItemDataRole.UserRole)
-            self.preview.show_file(path)
-        else:
+        self._refresh_preview()
+
+    def _refresh_preview(self):
+        """按当前项及其页数范围刷新右侧预览。"""
+        selected = self.list_widget.selectedItems()
+        if not selected:
             self.preview.clear()
+            return
+        # selectedItems() 按行序返回, 多选时未必是用户正在操作的那一行;
+        # 当前项才对应焦点与焦点行的页数微调框, 以它为准
+        item = self.list_widget.currentItem()
+        if item is None or item not in selected:
+            item = selected[0]
+        widget = item.data(Qt.ItemDataRole.UserRole + 1)
+        page_range = widget.page_range() if isinstance(widget, FileItemWidget) else None
+        self.preview.show_file(item.data(Qt.ItemDataRole.UserRole), page_range)
+
+    def _on_range_changed(self):
+        """页数范围改动: 预览切到被改动的那一行。
+
+        页数微调框是列表项的子控件, 点它不会让列表同步当前项, 所以这里
+        显式把该项设为当前项 —— 否则用户改了范围却看不到预览有任何反应。
+        """
+        widget = self.sender()
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.data(Qt.ItemDataRole.UserRole + 1) is widget:
+                self.list_widget.setCurrentItem(item)
+                self._refresh_preview()
+                return
 
     # -- data access --------------------------------------------
 
