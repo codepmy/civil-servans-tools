@@ -10,6 +10,16 @@ from tools.pdf_converter.core.models import ParsedDocument, CleanedDocument, Que
 HEADER_CUTOFF_MM = 28.0
 FOOTER_START_MM = 270.0
 SECTION_MARKER = "__SECTION__"
+# 视觉行合并时的最大行内 x 空隙(mm)。同基线但相距过远的两段文字
+# (如粉笔页脚"本试卷由…生成"与"第X页，共X页"相隔约113mm)不合并，
+# 否则按行配置的过滤规则会整体失效。词间/选项空隙通常 < 10mm。
+X_GAP_SPLIT_MM = 20.0
+# 小数点/百分数形态(点号紧贴 1-2 位数字, 后面不再跟数字)。用于把材料里
+# 换行开头的 "5.26%；…" 与真题号 "5. 下列…" 区分开。
+DECIMAL_LIKE_RE = re.compile(r"^\s*\d{1,2}[\.．]\d{1,2}(?!\d)")
+# 判断重复文本是否位于"每页同一高度"的容差(mm)。页眉/水印在版式里位置固定,
+# 而题目的固定句式(如"填入画横线部分最恰当的一项是：")y 随题目浮动。
+HEADER_Y_TOLERANCE_MM = 10.0
 
 
 def _u(*codes: int) -> str:
@@ -143,9 +153,15 @@ class XingceCleaner:
         if pdf_doc:
             pdf_doc.close()
 
-        questions = self._extract_questions(exam_lines)
+        # 没有模块标题的卷子(专项练习)需要在题目组之前收集共享材料。
+        has_section_marker = any(item[0] == SECTION_MARKER for item in exam_lines)
+        questions = self._extract_questions(
+            exam_lines, collect_leading_material=not has_section_marker
+        )
         self._annotate_question_ranges(questions)
-        self._annotate_data_analysis_questions(questions)
+        self._annotate_data_analysis_questions(
+            questions, force_all=self._detect_data_analysis_special(repeated_texts, doc)
+        )
         # Keep original question numbers from the PDF — each section
         # (演练一, 实战演练二, ...) has its own independent numbering.
 
@@ -179,7 +195,7 @@ class XingceCleaner:
     @staticmethod
     def _extract_positioned_lines(page) -> list[tuple[str, float, float]]:
         page_dict = page.get_text("rawdict", sort=False)
-        raw_lines: list[tuple[str, float, float, float]] = []
+        raw_lines: list[tuple[str, float, float, float, float]] = []
         for block in page_dict.get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -192,14 +208,15 @@ class XingceCleaner:
                 x_mm = bbox[0] * 25.4 / 72
                 y0_mm = bbox[1] * 25.4 / 72
                 y1_mm = bbox[3] * 25.4 / 72
-                raw_lines.append((text, x_mm, y0_mm, y1_mm))
+                x1_mm = bbox[2] * 25.4 / 72
+                raw_lines.append((text, x_mm, y0_mm, y1_mm, x1_mm))
         lines = XingceCleaner._merge_visual_lines(raw_lines)
         lines.sort(key=lambda item: (round(item[1], 1), item[2]))
         return lines
 
     @staticmethod
     def _merge_visual_lines(
-        raw_lines: list[tuple[str, float, float, float]],
+        raw_lines: list[tuple[str, float, float, float, float]],
     ) -> list[tuple[str, float, float]]:
         """Merge rawdict lines that belong to the same visual row.
 
@@ -212,12 +229,20 @@ class XingceCleaner:
         wrong option. Rebuild visual rows first: lines whose y-ranges
         overlap substantially are one row; within a row, fragments are
         joined left-to-right with spaces.
+
+        Fragments whose x-gap exceeds X_GAP_SPLIT_MM stay separate rows
+        even when their y-ranges overlap.  Far-apart pairs that merely
+        share a baseline — e.g. 粉笔 footer text "· 本试卷由…生成" (x≈12mm)
+        and "第 1 页，共 27 页" (x≈172mm, gap ≈113mm) — must NOT be glued
+        into one line: the configured per-line filter rules
+        (xingce_filter_rules.json) match each fragment individually, and
+        a glued line no longer matches either pattern.
         """
         if not raw_lines:
             return []
         # Greedy clustering by y: each new fragment joins the first row
         # whose representative line overlaps it substantially.
-        rows: list[list[tuple[str, float, float, float]]] = []
+        rows: list[list[tuple[str, float, float, float, float]]] = []
         for frag in sorted(raw_lines, key=lambda r: (r[2], r[3])):
             for row in rows:
                 rep = row[0]
@@ -233,8 +258,19 @@ class XingceCleaner:
         merged: list[tuple[str, float, float]] = []
         for row in rows:
             row.sort(key=lambda r: r[1])
-            text = " ".join(frag[0] for frag in row)
-            merged.append((text, min(frag[2] for frag in row), row[0][1]))
+            row_y0 = min(frag[2] for frag in row)
+            parts: list[str] = []
+            row_x0 = row[0][1]
+            prev_x1: float | None = None
+            for frag in row:
+                if prev_x1 is not None and frag[1] - prev_x1 > X_GAP_SPLIT_MM:
+                    merged.append((" ".join(parts), row_y0, row_x0))
+                    parts = []
+                    row_x0 = frag[1]
+                parts.append(frag[0])
+                prev_x1 = frag[4]
+            if parts:
+                merged.append((" ".join(parts), row_y0, row_x0))
         return merged
 
     @staticmethod
@@ -620,7 +656,15 @@ class XingceCleaner:
             return "D"
         return None
 
-    def _extract_questions(self, lines: list[tuple]) -> list[Question]:
+    def _extract_questions(self, lines: list[tuple],
+                           collect_leading_material: bool = False) -> list[Question]:
+        """从行序列中提取题目。
+
+        collect_leading_material: 文档没有模块标题(如"第五部分 资料分析")时,
+        把题目组之前出现的正文段落也收集为 section_heading。专项练习卷
+        (整卷只有一个模块)属于这种情况——它的共享材料直接跟在页眉之后,
+        没有模块标题领起, 不收集就会在第1题之前被整段丢弃。
+        """
         questions: list[Question] = []
         current_q: Question | None = None
         stem_lines: list[str] = []
@@ -641,6 +685,15 @@ class XingceCleaner:
             nonlocal current_q, stem_lines, current_option, last_question_num, last_x_mm
             if current_q:
                 current_q.stem = "\n".join(stem_lines).strip()
+                # 记录本题最后一行文字的位置。资料分析的共享材料(表格/图表)
+                # 常排在上一题选项之后、下一题题干之前, 那段区间按 y 划分属于
+                # 上一题, 但图片其实是下一题的材料 —— 用这个位置判断归属。
+                # 只在题目以完整文字选项收尾时才记录: 图形推理这类题没有文字
+                # 选项行(选项本身就是图片), 图片紧跟题干, 按末行截断会把本题
+                # 的图误判成下一题的材料。
+                if current_q.options and all((opt.text or "").strip() for opt in current_q.options):
+                    current_q.source_last_page = last_page
+                    current_q.source_last_y_mm = last_y_mm
                 questions.append(current_q)
                 last_question_num = current_q.number
                 current_q = None
@@ -687,9 +740,19 @@ class XingceCleaner:
                 # Guard: "8.7%" / "3.14" are decimals/percentages, not question
                 # numbers.  Only applies to 1-digit numbers followed immediately
                 # by another digit.  Does NOT affect "64.2024年" (64 > 9) or
-                # "8. 下列..." (the next char is not a digit).
+                # "8. 下列..." (the next char is not a digit).  A stem that
+                # contains CJK characters is a real question ("4. 2025年12月…"),
+                # so the decimal guard only fires for pure number/percent rows.
                 after_sep = line[q_match.end():].lstrip()
-                if q_num <= 9 and after_sep and after_sep[0].isdigit():
+                if (q_num <= 9 and after_sep and after_sep[0].isdigit()
+                        and not re.search(r"[一-鿿]", after_sep)):
+                    q_match = None
+                elif DECIMAL_LIKE_RE.match(line):
+                    # 材料行换行后以小数/百分比开头(如 "5.26%；人均日生活用水量
+                    # 185.03升…")会被误认成题号, 使其后所有题号整体错位。小数
+                    # 的形态是点号紧贴 1-2 位数字再接非数字; 真题号的点号后面
+                    # 是空格("10. 以下折线图…")或直接跟汉字("1.下列"), 且
+                    # "1464．2024年" 这类合并题号的整数部分有 4 位, 都不命中。
                     q_match = None
             if q_match and self._is_next_question_number(q_match, current_q, last_question_num):
                 finish_current_question()
@@ -813,7 +876,15 @@ class XingceCleaner:
             # finish_current_question having been called), section headings
             # like "实战演练二" can appear between groups.  Catch them
             # here instead of silently dropping them.
-            if current_q is None and not collecting_section and self._looks_like_material_start(line):
+            #
+            # In a module-only practice set (no section headings at all) the
+            # shared material of the next question group also lands here, so
+            # accept any real prose line as material when the paper has no
+            # section markers.
+            if current_q is None and not collecting_section and (
+                self._looks_like_material_start(line)
+                or (collect_leading_material and self._looks_like_material_content(line))
+            ):
                 pending_sections.append(line)
                 pending_section_xs = [x_mm]
                 pending_section_ys = [y_mm]
@@ -1009,6 +1080,17 @@ class XingceCleaner:
             return True
         if re.match(r"^(?:19|20)\d{2}" + re.escape(YEAR), compact):
             return True
+        # 讲次标题, e.g. "第2讲 专项练习二" — a lecture heading that opens
+        # each 讲 on its own page and must start a new section instead of
+        # being appended to the previous question's D option.
+        # Table-of-contents rows ("第1讲 专项练习一...........1") share the
+        # same prefix but trail dotted leaders + page numbers — excluded by
+        # requiring the title body to end right after ≤12 non-dot chars.
+        lecture = re.match(
+            r"^第\s*(?:\d{1,2}|[一二三四五六七八九十]+)\s*讲([^。.…]*)$", compact
+        )
+        if lecture and len(lecture.group(1)) <= 12:
+            return True
         # Section-like headings that appear between question groups
         # (e.g. after an answer comparison table): 实战演练二, 模拟演练一
         if re.match(
@@ -1108,6 +1190,12 @@ class XingceCleaner:
     @staticmethod
     def _annotate_question_ranges(questions: list[Question]) -> None:
         for idx, question in enumerate(questions):
+            prev_q = questions[idx - 1] if idx > 0 else None
+            if prev_q is not None:
+                # 上一题末行位置: 图片夹在"上一题末行之后、本题题干之前"时,
+                # 它是本题的共享材料, 排版时要从上一题手里要回来。
+                question.source_prev_last_page = getattr(prev_q, "source_last_page", None)
+                question.source_prev_last_y_mm = getattr(prev_q, "source_last_y_mm", None)
             next_q = questions[idx + 1] if idx + 1 < len(questions) else None
             if not next_q:
                 question.source_end_page = None
@@ -1119,7 +1207,17 @@ class XingceCleaner:
                 question.source_end_y_mm = getattr(next_q, "source_y_mm", None)
 
     @staticmethod
-    def _annotate_data_analysis_questions(questions: list[Question]) -> None:
+    def _annotate_data_analysis_questions(questions: list[Question], force_all: bool = False) -> None:
+        """标注资料分析题目。
+
+        force_all: 整卷就是资料分析专项(页眉写明模块、但没有模块标题行)时,
+        section_heading 里不会出现"资料分析"字样, 需要整卷标注, 否则材料排版
+        和图片归属都会走错分支。
+        """
+        if force_all:
+            for question in questions:
+                question.is_data_analysis = True
+            return
         in_data_analysis = False
         for question in questions:
             heading = getattr(question, "section_heading", "") or ""
@@ -1127,6 +1225,21 @@ class XingceCleaner:
                 in_data_analysis = True
             if in_data_analysis:
                 question.is_data_analysis = True
+
+    @staticmethod
+    def _detect_data_analysis_special(repeated_texts: set[str], doc: ParsedDocument) -> bool:
+        """判定"资料分析专项卷": 整卷只有资料分析, 正文里没有模块标题。
+
+        这类 PDF 只把模块写进页眉/封面(如"专项智能练习（资料分析）"), 正文
+        直接开始材料, 因此 _annotate_data_analysis_questions 的 section_heading
+        检查永远不会命中。用重复页眉和文件名兜底识别。
+        """
+        for text in repeated_texts:
+            if DATA_ANALYSIS in re.sub(r"\s+", "", text):
+                return True
+        file_path = doc.metadata.get("file_path", "") or ""
+        file_name = file_path.replace("\\", "/").rsplit("/", 1)[-1]
+        return DATA_ANALYSIS in re.sub(r"\s+", "", file_name)
 
     @staticmethod
     def _collect_visual_regions(doc: ParsedDocument) -> dict[int, list[tuple[float, float, float, float]]]:
@@ -1347,15 +1460,22 @@ class XingceCleaner:
 
     @staticmethod
     def _detect_repeated_headers(all_page_lines: list[list[tuple]]) -> set[str]:
-        """Detect text repeated across 3+ pages — likely page headers/watermarks.
+        """Detect text repeated across 3+ pages at a fixed height — page headers.
 
         Exam content (question numbers, option labels, section markers) is
-        excluded from the check.  Only lines with >= 12 non-whitespace
-        CJK chars are considered — short numeric/generic lines would produce
-        too many false positives.
+        excluded from the check.  Only lines with >= 8 CJK chars are
+        considered — short numeric/generic lines would produce too many
+        false positives.
+
+        位置判据是必需的: 光看"重复 3 页以上"会把题目的固定句式一并吞掉。
+        逻辑填空的"填入画横线部分最恰当的一项是："在这份卷子里出现 17 次
+        (分布在多页), 但它不是页眉——y 随题目浮动。一旦误判成页眉过滤掉,
+        这些题的提问句就整批消失, 题目变得不知要作答什么。页眉/水印的本质
+        是在每页的同一高度反复出现, 据此区分二者。
         """
         from collections import defaultdict
         text_pages: dict[str, set[int]] = defaultdict(set)
+        text_ys: dict[str, list[float]] = defaultdict(list)
         for page_idx, page_lines in enumerate(all_page_lines):
             seen_this_page: set[str] = set()
             for item in page_lines:
@@ -1376,11 +1496,28 @@ class XingceCleaner:
                 cjk_chars = len(re.findall(r"[一-鿿]", compact))
                 if cjk_chars < 8:
                     continue
+                try:
+                    y_mm = float(item[1])
+                except (IndexError, TypeError, ValueError):
+                    y_mm = 0.0
+                text_ys[text].append(y_mm)
                 if text in seen_this_page:
                     continue
                 seen_this_page.add(text)
                 text_pages[text].add(page_idx)
-        return {text for text, pages in text_pages.items() if len(pages) >= 3}
+        headers: set[str] = set()
+        for text, pages in text_pages.items():
+            if len(pages) < 3:
+                continue
+            ys = sorted(text_ys[text])
+            # 以中位高度为基准看多数出现位置是否聚在一起。要求"全部相同"
+            # 太严——封面的标题会落在页面中部, 与正文各页的页眉位置相差
+            # 近百毫米, 个别偏差不该推翻整体判据。
+            median_y = ys[len(ys) // 2]
+            within = sum(1 for y in ys if abs(y - median_y) <= HEADER_Y_TOLERANCE_MM)
+            if within >= len(ys) * 0.6:
+                headers.add(text)
+        return headers
 
 
 def detect_exam_type(doc: ParsedDocument) -> str:

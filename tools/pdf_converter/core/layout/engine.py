@@ -18,6 +18,26 @@ FIGURE_CHAR = _u(0x56FE)
 NOTE_CHAR = _u(0x6CE8)
 QUESTION_PROMPT_PREFIX = _u(0x8BF7, 0x56DE, 0x7B54)
 
+# 讲次标题(讲义"第X讲 专项练习X"): 新讲从新页开始, 标题还原为页首头部
+PART_TITLE_RE = re.compile(r"^第(?:[0-9]{1,2}|[一二三四五六七八九十]+)讲")
+
+# 换行时不可拆分的单元: 连续的数字/拉丁串(含小数点、千分位、百分号、正负号)。
+# 资料分析材料数字密集, "33445.10" 被断成 "3344"+"5.10" 会让人看错量级。
+BREAK_ATOM_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z.,%+\-]*")
+
+# 题干里并列列表项的序号: ①-⑩、⑴-⑽, 或 (1)/(一) 等形式
+STEM_LIST_ITEM_RE = re.compile(
+    r"^(?:[①-⑩⑴-⑽]|[（(]\s*(?:\d{1,2}|[一二三四五六七八九十]+)\s*[)）])"
+)
+
+# 资料分析图表选项题的选项占位词: 选项文字是这些词(或为空)时, 选项内容
+# 其实是图表本身, 需要把图与该选项的标签排在一起。
+CHART_PLACEHOLDERS = frozenset({
+    "如图所示", "如下图", "见上图", "见下图",
+    "如右图", "如左图", "如上图", "如上图所示",
+    "见图", "见图表", "",
+})
+
 
 @dataclass
 class LayoutConfig:
@@ -34,6 +54,10 @@ class LayoutConfig:
     header_font: str = "SimHei"
     header_size: float = 12.0
     header_bold: bool = True
+
+    part_title_font: str = "SimHei"
+    part_title_size: float = 12.0
+    part_title_bold: bool = True
 
     question_num_font: str = "SimHei"
     question_num_size: float = 10.5
@@ -84,6 +108,7 @@ class LayoutConfig:
         opt = fonts.get("option", {})
         header = fonts.get("header", {})
         pn = fonts.get("page_number", {})
+        pt = fonts.get("part_title", {})
 
         ps = o.get("page_size", "")
         if ps and ps in cls.PAPER_SIZES:
@@ -101,6 +126,8 @@ class LayoutConfig:
             margin_right=o.get("margin_right", margins.get("right_mm", 25)),
             header_font=o.get("header_font", header.get("family", "SimHei")),
             header_size=o.get("header_size", header.get("size_pt", 12)),
+            part_title_font=o.get("part_title_font", pt.get("family", "SimHei")),
+            part_title_size=o.get("part_title_size", pt.get("size_pt", 12)),
             question_num_font=o.get("num_font", qn.get("family", "SimHei")),
             question_num_size=qn.get("size_pt", 10.5),
             stem_font=o.get("body_font", stem.get("family", "SimSun")),
@@ -203,9 +230,19 @@ class LayoutEngine:
 
     def _layout_question(self, question: Question):
         line_height = self._line_height(self.config.stem_size)
+        # 图片放置模式提前判定(只读属性, 无副作用): 只有"普通插图"路径存在
+        # 排在题干之前的共享材料图。图形推理的选项图、图表选项题的图表都排在
+        # 题干之后 —— 它们本身就是选项内容, 由选项渲染阶段与标签交错输出。
+        is_da = getattr(question, "is_data_analysis", False)
+        is_last = getattr(question, "source_end_page", None) is None
+        has_chart_opts = self._has_chart_options(question)
+        has_image_opts = self._has_image_options(question)
+        has_plain_images = not (has_image_opts or has_chart_opts or is_last)
+        stem_images: list[ImageBlock] = []
+
         if getattr(question, "section_heading", ""):
             self._layout_section_heading(question, line_height)
-        elif getattr(question, "is_data_analysis", False):
+        elif is_da:
             # Data analysis question without explicit section heading:
             # if it's the first question on its source page, place any
             # unconsumed images above this question as implicit section
@@ -222,6 +259,16 @@ class LayoutEngine:
                     end_y=q_y,
                 ):
                     self._add_image(img)
+
+        # 共享材料图先于题干输出: 源位置上排在本题题干之前的图(表格/图表
+        # 材料)是"读题前要先看"的内容, 排在题干之后会让题干先问到一张还没
+        # 出现的表。取图放在 section 处理之后, 避免抢走 section 的材料。
+        if has_plain_images:
+            leading, stem_images = self._split_leading_images(
+                question, self._take_images_for_question(question)
+            )
+            for img in leading:
+                self._add_image(img)
 
         q_label = f"{question.number}{self.config.question_suffix}"
         stem_segments = self._stem_segments(question.stem, section_heading=getattr(question, "section_heading", ""))
@@ -243,41 +290,19 @@ class LayoutEngine:
                 if line:
                     self._add_text_line("question_stem", line, self.config.margin_left, self.config.stem_font, self.config.stem_size, line_height)
 
-        # Per-question image placement: only for non-data-analysis sections.
-        # Data analysis images are section-level (shared material charts/tables)
-        # and are already placed by _layout_data_analysis_section.
+        # Per-question image placement (题干之后的图): only for non-data-analysis
+        # sections. Data analysis images are section-level (shared material
+        # charts/tables) and are already placed by _layout_data_analysis_section.
         # Exceptions:
         #   1. The last question may have inline option images on trailing pages.
         #   2. DA questions with chart-based options (all options "如图所示" etc.)
         #      need per-question images placed between stem and option labels.
-        is_da = getattr(question, "is_data_analysis", False)
-        is_last = getattr(question, "source_end_page", None) is None
-        _CHART_PLACEHOLDERS = frozenset({
-            "如图所示", "如下图", "见上图", "见下图",
-            "如右图", "如左图", "如上图", "如上图所示",
-            "见图", "见图表", "",
-        })
-        has_chart_opts = (
-            is_da
-            and len(question.options) >= 4
-            and all((opt.text or "").strip() in _CHART_PLACEHOLDERS for opt in question.options)
-        )
-        # Detect image-option questions (e.g. 图形推理): all options have no
-        # meaningful text body — they are pure images labeled A/B/C/D.
-        _option_bodies: list[str] = []
-        for opt in question.options:
-            body = self._normalize_option_text(opt.text).strip()
-            if body and body != opt.label:
-                _option_bodies.append(body)
-        has_image_opts = (
-            not is_da
-            and not has_chart_opts
-            and len(question.options) >= 4
-            and len(_option_bodies) == 0
-        )
         # For image-option questions, capture images now but defer placement
         # until after labels are rendered, so labels appear before images.
         _option_images: list[ImageBlock] = []
+        # 图表选项图与选项一一对应时, 同样推迟到选项渲染阶段交替输出
+        _chart_paired_images: list[ImageBlock] = []
+        _CHART_OPTION_IMG_SCALE = 0.8
         if has_image_opts:
             _option_images = self._take_images_in_source_range(
                 start_page=question.source_page,
@@ -304,16 +329,22 @@ class LayoutEngine:
             # avoid displacing the next section, but large enough for
             # embedded chart labels (pie chart legends, axis annotations)
             # to remain legible.
-            _CHART_OPTION_IMG_SCALE = 0.8
             end_page = getattr(question, "source_end_page", None) or question.source_page
             end_y = getattr(question, "source_end_y_mm", None)
-            for img in self._take_images_in_source_range(
+            chart_images = self._take_images_in_source_range(
                 start_page=question.source_page,
                 start_y=getattr(question, "source_y_mm", 0) or 0,
                 end_page=end_page,
                 end_y=end_y,
-            ):
-                self._add_image(img, max_scale=_CHART_OPTION_IMG_SCALE)
+            )
+            if len(chart_images) >= len(question.options):
+                # 每个选项一张图（如"下列选项最符合…的是"配四张图表）:
+                # 推迟到选项渲染阶段与标签交替输出, 否则图挤在一起,
+                # A/B/C/D 标签无法与各自的图对应。
+                _chart_paired_images = chart_images
+            else:
+                for img in chart_images:
+                    self._add_image(img, max_scale=_CHART_OPTION_IMG_SCALE)
         elif is_last:
             # Last DA question: extend range to capture trailing option images,
             # but exclude the final watermark page (QR code / ad pages at the
@@ -327,7 +358,7 @@ class LayoutEngine:
                 # Text-based option charts (e.g. Q130's bar chart) are on
                 # the page after the stem, not captured by the option-text check.
                 _has_chart_opts = any(
-                    (o.text or "").strip() in _CHART_PLACEHOLDERS
+                    (o.text or "").strip() in CHART_PLACEHOLDERS
                     for o in question.options
                 ) if question.options else False
                 _stem_mentions_chart = bool(
@@ -348,7 +379,9 @@ class LayoutEngine:
             ):
                 self._add_image(img)
         else:
-            self._place_images_for_question(question, self._page_questions.get(question.source_page, []))
+            # 题干之后取到的图: 题干提到的图("以下折线图反映了…")等
+            for img in stem_images:
+                self._add_image(img)
 
         self._ensure_space(1)
         self._current_y += 1
@@ -376,8 +409,38 @@ class LayoutEngine:
             else:
                 for img in _option_images:
                     self._add_image(img)
+        elif _chart_paired_images:
+            # 图表选项题且每张图对应一个选项: 标签与图交替输出, 让 A/B/C/D
+            # 各自贴着自己的图。选项无文字时标签仍保留——它正是用来区分
+            # 四张图的。
+            for i, opt in enumerate(question.options):
+                label = f"{opt.label}{self.config.option_suffix} "
+                opt_body = self._normalize_option_text(opt.text)
+                if opt_body.strip() == opt.label:
+                    opt_body = ""
+                opt_lines = self._break_lines(
+                    (label + opt_body).strip(), opt_width, self.config.option_font, self.config.option_size
+                )
+                img = _chart_paired_images[i] if i < len(_chart_paired_images) else None
+                if img is not None:
+                    # 标签必须和它的图同页, 否则图被挤到下一页后标签成了孤儿,
+                    # 读者无法判断那页的图是哪个选项的
+                    _, img_h = self._image_render_size(img, _CHART_OPTION_IMG_SCALE)
+                    self._ensure_space(opt_line_h * max(1, len(opt_lines)) + img_h + 4)
+                for line in opt_lines:
+                    self._add_text_line("option_text", line, opt_indent, self.config.option_font, self.config.option_size, opt_line_h)
+                if img is not None:
+                    self._add_image(img, max_scale=_CHART_OPTION_IMG_SCALE)
         else:
+            # 选项文本全为空(纯图表选项, 如"下列…的是"配四张图): 图表本身就是
+            # 选项内容, 再输出一排 "A." / "B." 空标签只会在图后面堆出无意义
+            # 的字母。有文字("如图所示")时仍输出, 保留选项与图的对应关系。
+            blank_labels = has_chart_opts and not any(
+                self._normalize_option_text(opt.text).strip() for opt in question.options
+            )
             for opt in question.options:
+                if blank_labels:
+                    continue
                 label = f"{opt.label}{self.config.option_suffix} "
                 opt_body = self._normalize_option_text(opt.text)
                 # When the option text is just the option letter (e.g. "A" for label A),
@@ -410,10 +473,55 @@ class LayoutEngine:
         if getattr(question, "is_data_analysis", False) or self._is_data_analysis_section(heading_lines):
             self._layout_data_analysis_section(question, heading_lines, line_height)
             return
+        if self._is_part_title_heading(heading_lines):
+            self._layout_part_title(question, heading_lines, line_height)
+            return
         self._add_compact_section_lines(heading_lines, line_height)
         self._ensure_space(1)
         self._current_y += 1
         self._place_images_for_section(question)
+
+    @classmethod
+    def _is_part_title_heading(cls, heading_lines: list[str]) -> bool:
+        """是否"第X讲 专项练习X"式讲次标题(讲义每讲的页首头部)。"""
+        if not heading_lines:
+            return False
+        return bool(PART_TITLE_RE.match(LayoutEngine._normalize_text(heading_lines[0])))
+
+    def _layout_part_title(self, question: Question, heading_lines: list[str], line_height: float):
+        """讲次标题排版: 新讲强制从新页开始, 黑体标题 + 小字说明行。
+
+        还原讲义"每讲独立成页"的结构——标题是下一页的头部, 而非紧贴
+        上一题的流式段落。分页守卫保证文档开头不会因此产生空白页。
+        标题行后随的日期/上交说明等行用小字号紧随其后。
+        """
+        if self._current_y > self.content_top + 0.1:
+            self._add_page_number()
+            self._new_page()
+        title = LayoutEngine._normalize_text(heading_lines[0])
+        title_lh = self._line_height(self.config.part_title_size)
+        for line in self._break_lines(
+            title, self.content_width, self.config.part_title_font, self.config.part_title_size
+        ):
+            self._add_text_line(
+                "section_title", line, self.config.margin_left,
+                self.config.part_title_font, self.config.part_title_size, title_lh,
+            )
+        note_lh = self._line_height(self.config.page_num_size)
+        for note in heading_lines[1:]:
+            normalized = LayoutEngine._normalize_text(note)
+            if not normalized:
+                continue
+            for line in self._break_lines(
+                normalized, self.content_width, self.config.page_num_font, self.config.page_num_size
+            ):
+                self._add_text_line(
+                    "section_title", line, self.config.margin_left,
+                    self.config.page_num_font, self.config.page_num_size, note_lh,
+                )
+        self._place_images_for_section(question)
+        self._ensure_space(2)
+        self._current_y += 2
 
     def _layout_data_analysis_section(self, question: Question, heading_lines: list[str], line_height: float):
         images = self._take_images_for_section(question)
@@ -863,12 +971,43 @@ class LayoutEngine:
         for img in images:
             grouped.setdefault(img.page_number, []).append(img)
         for page_images in grouped.values():
-            # Sort top-to-bottom (descending Y, since PDF y=0 is at page bottom),
-            # then left-to-right (ascending X). This matches natural reading order.
-            page_images.sort(key=lambda i: (-i.bbox[1], i.bbox[0]))
+            # 按阅读顺序排: 从上到下(y 升序), 同一高度从左到右(x 升序)。
+            # bbox 来自 PyMuPDF 的 clip 矩形, 原点在页面左上角, y 向下递增,
+            # 所以升序才是从上到下。(早期按降序排, 注释里误以为原点在左下,
+            # 导致同一页上多张图的顺序整体颠倒 —— 例如资料分析的折线图排在
+            # 了它后面那张共享材料表格的下面。)
+            page_images.sort(key=lambda i: (i.bbox[1], i.bbox[0]))
         return grouped
 
-    def _place_images_for_question(self, question: Question, page_questions: list[Question]):
+    def _has_chart_options(self, question: Question) -> bool:
+        """图表选项题: 资料分析题的选项全是"如图所示"之类的占位词(或为空)。
+
+        这类题的图就是选项内容本身, 要放到选项渲染阶段与标签交错输出。
+        """
+        return bool(
+            getattr(question, "is_data_analysis", False)
+            and len(question.options) >= 4
+            and all((opt.text or "").strip() in CHART_PLACEHOLDERS for opt in question.options)
+        )
+
+    def _has_image_options(self, question: Question) -> bool:
+        """图片选项题(如图形推理): 选项没有有效文字, 选项本身就是图。"""
+        if getattr(question, "is_data_analysis", False) or self._has_chart_options(question):
+            return False
+        if len(question.options) < 4:
+            return False
+        for opt in question.options:
+            body = self._normalize_option_text(opt.text).strip()
+            if body and body != opt.label:
+                return False
+        return True
+
+    def _take_images_for_question(self, question: Question) -> list[ImageBlock]:
+        """取"本题"源区间内的图片(取出即从页图池移除, 不会重复取)。
+
+        只做范围判定, 不管渲染位置 —— 调用方按每张图的源位置决定它排在
+        题干上方还是下方。
+        """
         # For data analysis questions, extend the end-Y range by a margin so
         # trailing option images (bar charts, etc.) that fall between this
         # question's end and the next question's start are not lost.
@@ -881,13 +1020,61 @@ class LayoutEngine:
             # not stolen.  A larger margin was causing Q120→Q121 and
             # Q124→Q125 cross-question image bleed.
             end_y = end_y + 3.0
-        for img in self._take_images_in_source_range(
+        end_page = getattr(question, "source_end_page", None) or question.source_page
+        # 起点放宽: 上一题与本题同页时, 把范围上延到上一题的末行文字。
+        # 夹在"上一题末行之后、本题题干之前"的图片是本题的共享材料
+        # (资料分析的表格常排在上一题选项之后), 按 y 区间本该归本题,
+        # 但上一题会先把它取走, 这里把它要回来。
+        start_y = getattr(question, "source_y_mm", 0) or 0
+        prev_last_page = getattr(question, "source_prev_last_page", None)
+        prev_last_y = getattr(question, "source_prev_last_y_mm", None)
+        if prev_last_page == question.source_page and prev_last_y is not None:
+            start_y = min(start_y, prev_last_y)
+        # 终点收紧: 排在本题末行文字之后的图片不属于本题, 留给下一题。
+        # 与上面的放宽互补 —— 同一张图只会落进"上一题末行之后"或
+        # "本题末行之前"其中一侧, 不重不漏。两处都要求同页, 跨页情况
+        # 仍交给下面的 end_page_floor 处理。
+        last_page = getattr(question, "source_last_page", None)
+        last_y = getattr(question, "source_last_y_mm", None)
+        if last_page == end_page and last_y is not None and end_y is not None:
+            end_y = min(end_y, last_y)
+        # 末页保护: 本题文本结束在上一页时, 末页上位于该页首题之前的图片
+        # 是那个题的共享材料(资料分析的材料表常排成一整页图片), 不属于本题。
+        # 不加限制的话, 上一题会把下一题的材料图提前取走, 等排到下一题时
+        # 已无图可用, 材料就会消失。
+        end_page_floor: float | None = None
+        if end_page != question.source_page:
+            page_first = (self._page_questions.get(end_page) or [None])[0]
+            if page_first is not None and page_first is not question:
+                end_page_floor = getattr(page_first, "source_y_mm", 0) or 0
+        return self._take_images_in_source_range(
             start_page=question.source_page,
-            start_y=getattr(question, "source_y_mm", 0) or 0,
-            end_page=getattr(question, "source_end_page", None) or question.source_page,
+            start_y=start_y,
+            end_page=end_page,
             end_y=end_y,
-        ):
-            self._add_image(img)
+            end_page_floor=end_page_floor,
+        )
+
+    @staticmethod
+    def _split_leading_images(question: Question, images: list[ImageBlock]) -> tuple[list[ImageBlock], list[ImageBlock]]:
+        """按源位置把图片分成"题干之上"和"其余"两组, 返回 (leading, rest)。
+
+        共享材料(资料分析的表格/图表)常排在上一题选项之后、本题题干之前,
+        源 y 小于题干 y —— 它要先于题干出现, 否则题干里的"表中所列行业中
+        …"会先于表格本身, 读者不知道在问哪张表。题干自身提到的图("以下
+        折线图反映了…")源位置在题干之后, 仍排在题干下方。
+
+        跨页图片不参与拆分: 它们必然排在题干所在页之后, 归入 rest。
+        """
+        q_y = getattr(question, "source_y_mm", 0) or 0
+        leading: list[ImageBlock] = []
+        rest: list[ImageBlock] = []
+        for img in images:
+            if img.page_number == question.source_page and img.bbox[1] + 2 < q_y:
+                leading.append(img)
+            else:
+                rest.append(img)
+        return leading, rest
 
     def _place_images_for_section(self, question: Question):
         for img in self._take_images_for_section(question):
@@ -906,7 +1093,12 @@ class LayoutEngine:
             end_y=getattr(question, "section_end_y_mm", None),
         )
 
-    def _take_images_in_source_range(self, start_page: int, start_y: float, end_page: int, end_y: float | None) -> list[ImageBlock]:
+    def _take_images_in_source_range(self, start_page: int, start_y: float, end_page: int, end_y: float | None,
+                                     end_page_floor: float | None = None) -> list[ImageBlock]:
+        """取源页面区间内的图片。
+
+        end_page_floor: 末页上低于该 y 的图片不取(留给末页自己的题目)。
+        """
         assigned_by_page: dict[int, list[ImageBlock]] = {}
         for page_no in range(start_page, end_page + 1):
             page_images = self._images_by_page.get(page_no, [])
@@ -916,6 +1108,8 @@ class LayoutEngine:
             for img in page_images:
                 img_y = img.bbox[1]
                 if page_no == start_page and img_y + 2 < start_y:
+                    continue
+                if page_no == end_page and end_page_floor is not None and img_y + 2 < end_page_floor:
                     continue
                 if page_no == end_page and end_y is not None and img_y >= end_y - 2:
                     continue
@@ -930,6 +1124,15 @@ class LayoutEngine:
             page_images = self._images_by_page.get(page_no, [])
             self._images_by_page[page_no] = [img for img in page_images if img not in assigned]
         return result
+
+    def _image_render_size(self, img: ImageBlock, max_scale: float = 1.0) -> tuple[float, float]:
+        """图片在输出页上的渲染尺寸(与 _add_image 的缩放规则一致)。"""
+        scale = min(
+            self.content_width / max(img.width_mm, 1),
+            (self.content_bottom - self.content_top) / max(img.height_mm, 1),
+            max_scale,
+        )
+        return max(10, img.width_mm * scale), max(8, img.height_mm * scale)
 
     def _add_image(self, img: ImageBlock, max_scale: float = 1.0):
         # Skip tiny decorative images (watermark icons, page ornaments, etc.)
@@ -1030,10 +1233,42 @@ class LayoutEngine:
         return bool(re.search(r"\d\s+[+\-*/×÷=]\s*\d", text or ""))
 
     @staticmethod
+    def _split_stem_list_items(text: str) -> list[str]:
+        """按原始换行拆出并列的题干列表项(如资料分析的"①②③④"待判断表述)。
+
+        这类表述在原文里各自成行, 一旦被归一化成整段, 几个待判断的陈述
+        会连成一串, 阅读和作答都受影响。判据是"序号独立成行"而非符号本身:
+        只出现一两次、或混在行内的序号仍按普通内容处理, 避免误拆。
+
+        返回空列表表示没有列表结构, 调用方按普通题干处理。
+        """
+        lines = [line.strip() for line in str(text or "").splitlines()]
+        lines = [line for line in lines if line]
+        if len(lines) < 2:
+            return []
+        if sum(1 for line in lines if STEM_LIST_ITEM_RE.match(line)) < 2:
+            return []
+        # 序号行各自开新段, 其余行(题干的自然折行、列表项的续行)并入前一段
+        segments: list[str] = []
+        for line in lines:
+            normalized = LayoutEngine._normalize_question_text(line)
+            if not normalized:
+                continue
+            if STEM_LIST_ITEM_RE.match(line) or not segments:
+                segments.append(normalized)
+            else:
+                segments[-1] += normalized
+        return segments
+
+    @staticmethod
     def _stem_segments(text: str, section_heading: str = "") -> list[str]:
         normalized = LayoutEngine._normalize_question_text(text)
         if not normalized:
             return [""]
+        # 并列序号独立成行的列表项各自成段(不限模块)
+        list_items = LayoutEngine._split_stem_list_items(text)
+        if list_items:
+            return list_items
         # Only split at circled numbers (①-⑩) in 政治理论/常识判断 sections
         # where they represent sub-question numbering. In other modules these
         # symbols are regular content and should not force line breaks.
@@ -1115,6 +1350,20 @@ class LayoutEngine:
         from reportlab.pdfbase.pdfmetrics import stringWidth
         return stringWidth(text, font_name, font_size) * 25.4 / 72
 
+    @staticmethod
+    def _break_tokens(text: str) -> list[str]:
+        """把文本切成换行单元: 连续的数字/拉丁串整体保留, 其余逐字符。"""
+        tokens: list[str] = []
+        pos = 0
+        for match in BREAK_ATOM_RE.finditer(text):
+            if match.start() > pos:
+                tokens.extend(text[pos:match.start()])
+            tokens.append(match.group())
+            pos = match.end()
+        if pos < len(text):
+            tokens.extend(text[pos:])
+        return tokens
+
     def _break_lines(self, text: str, max_width_mm: float, font_name: str, font_size: float) -> list[str]:
         text = text or ""
         if not text.strip():
@@ -1122,12 +1371,24 @@ class LayoutEngine:
         from reportlab.pdfbase.pdfmetrics import stringWidth
         max_w_pt = max(max_width_mm, 5) * 72 / 25.4
         lines, cur = [], ""
-        for ch in text:
-            if stringWidth(cur + ch, font_name, font_size) <= max_w_pt or not cur:
-                cur += ch
+        for token in self._break_tokens(text):
+            if len(token) > 1 and stringWidth(token, font_name, font_size) > max_w_pt:
+                # 单元本身超过一整行(超长数字串/无空格英文串): 退化为逐字符断行
+                if cur:
+                    lines.append(cur)
+                    cur = ""
+                for ch in token:
+                    if stringWidth(cur + ch, font_name, font_size) <= max_w_pt or not cur:
+                        cur += ch
+                    else:
+                        lines.append(cur)
+                        cur = ch
+                continue
+            if stringWidth(cur + token, font_name, font_size) <= max_w_pt or not cur:
+                cur += token
             else:
                 lines.append(cur)
-                cur = ch
+                cur = token
         if cur:
             lines.append(cur)
         return lines or [text]

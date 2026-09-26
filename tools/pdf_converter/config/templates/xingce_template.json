@@ -73,6 +73,14 @@
             "size_pt": 9,
             "_size_pt说明": "页码字号，通常比正文小，如9pt",
             "bold": false
+        },
+        "part_title": {
+            "_说明": "讲次标题(讲义'第X讲 专项练习X'): 每讲另起一页时的页首标题",
+            "family": "SimHei",
+            "_family说明": "讲次标题字体，默认黑体",
+            "size_pt": 12,
+            "_size_pt说明": "讲次标题字号，通常比正文大, 12pt=小四",
+            "bold": true
         }
     },
 

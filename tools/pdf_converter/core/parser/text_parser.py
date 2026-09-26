@@ -141,6 +141,9 @@ class TextParser(BaseParser):
         if skip_cover and page_index == 0:
             return []
         rects: list[fitz.Rect] = []
+        # 真实位图的矩形(区别于矢量绘制)。这些矩形之间不做 gap 合并——
+        # 见 _split_stacked_raster。
+        raster_rects: list[fitz.Rect] = []
         page_area = page_rect.get_area()
         # Images entirely inside the header or footer band (e.g. banner
         # logos, watermarks) must be dropped BEFORE rect merging.  If
@@ -159,7 +162,7 @@ class TextParser(BaseParser):
                 for rect in page.get_image_rects(xref):
                     if rect.y1 <= HEADER_CUTOFF_PT or rect.y0 >= footer_start_pt:
                         continue
-                    self._append_reasonable_rect(rects, rect, page_rect, page_area)
+                    self._append_reasonable_rect(raster_rects, rect, page_rect, page_area)
         except Exception:
             pass
 
@@ -169,9 +172,11 @@ class TextParser(BaseParser):
                     r = fitz.Rect(block["bbox"])
                     if r.y1 <= HEADER_CUTOFF_PT or r.y0 >= footer_start_pt:
                         continue
-                    self._append_reasonable_rect(rects, r, page_rect, page_area)
+                    self._append_reasonable_rect(raster_rects, r, page_rect, page_area)
         except Exception:
             pass
+
+        rects.extend(raster_rects)
 
         try:
             drawing_rects = []
@@ -185,7 +190,7 @@ class TextParser(BaseParser):
         except Exception:
             pass
 
-        result = self._render_rects(page, page_rect, page_index, rects)
+        result = self._render_rects(page, page_rect, page_index, rects, raster_rects=raster_rects)
         if not result:
             result = self._extract_regions_by_erasing_text(page, page_rect, page_index)
         return result
@@ -201,10 +206,22 @@ class TextParser(BaseParser):
         rects.append(r)
 
     def _render_rects(self, page: fitz.Page, page_rect: fitz.Rect, page_index: int,
-                      rects: list[fitz.Rect]) -> list[ImageBlock]:
+                      rects: list[fitz.Rect],
+                      raster_rects: list[fitz.Rect] | None = None) -> list[ImageBlock]:
         result: list[ImageBlock] = []
         page_area = page_rect.get_area()
+        raster = [fitz.Rect(r) for r in (raster_rects or [])]
+        # (矩形, 是否允许向外扩边裁剪)
+        candidates: list[tuple[fitz.Rect, bool]] = []
         for rect in self._merge_rects(rects, page_rect, gap=4):
+            pieces = self._split_stacked_raster(rect, raster)
+            if pieces:
+                # 拆出来的图原本无缝相邻, 裁剪时不能再向外扩边,
+                # 否则相邻两张会各自带上对方 2pt 的内容。
+                candidates.extend((piece, False) for piece in pieces)
+            else:
+                candidates.append((rect, True))
+        for rect, allow_pad in candidates:
             rect = self._trim_rect_against_option_lines(page, rect)
             if rect.is_empty or rect.width <= 0 or rect.height <= 0:
                 continue
@@ -218,10 +235,53 @@ class TextParser(BaseParser):
             if rect.width < 24 or rect.height < 8 or rect.get_area() < 350:
                 continue
             try:
-                result.append(self._render_clip(page, page_rect, page_index, rect))
+                result.append(self._render_clip(page, page_rect, page_index, rect,
+                                                pad=2 if allow_pad else 0))
             except Exception:
                 continue
         return result
+
+    @staticmethod
+    def _split_stacked_raster(rect: fitz.Rect, raster_rects: list[fitz.Rect]) -> list[fitz.Rect] | None:
+        """把"多张纵向无缝堆叠的位图被合并成的整图"拆回独立图片。
+
+        粉笔等 App 的图表选项题（"下列选项最符合…的是"）把 A/B/C/D 每个选项
+        渲染成一张独立图片纵向紧挨着排。矩形合并会把它们并成一整张，排版时
+        四个选项标签就与各自的图脱节了。
+
+        只有"合并结果恰好就是这组堆叠位图的并集"时才拆，避免影响位图外面
+        套了矢量边框等正常合并。
+        """
+        contained: list[fitz.Rect] = []
+        for r in raster_rects:
+            if r.is_empty or (r & rect).get_area() <= r.get_area() * 0.95:
+                continue
+            # 同一张图会同时出现在 get_images 与 text-dict 的图片块里,
+            # 坐标一致, 按坐标去重后才是真正的图片张数。
+            if any(abs(r.x0 - u.x0) < 0.5 and abs(r.y0 - u.y0) < 0.5
+                   and abs(r.x1 - u.x1) < 0.5 and abs(r.y1 - u.y1) < 0.5
+                   for u in contained):
+                continue
+            contained.append(r)
+        if len(contained) < 3:
+            return None
+        contained.sort(key=lambda r: r.y0)
+        heights = [r.height for r in contained]
+        widths = [r.width for r in contained]
+        if max(heights) - min(heights) > max(heights) * 0.25:
+            return None
+        if max(widths) - min(widths) > max(widths) * 0.15:
+            return None
+        for upper, lower in zip(contained, contained[1:]):
+            # 有可见间隙说明本来就是分开的图, 交给常规合并
+            if lower.y0 - upper.y1 > 3.0:
+                return None
+        union = contained[0]
+        for r in contained[1:]:
+            union = union | r
+        if union.get_area() < rect.get_area() * 0.92:
+            return None
+        return contained
 
     @staticmethod
     def _trim_rect_against_option_lines(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect:
@@ -303,10 +363,10 @@ class TextParser(BaseParser):
         return self._render_rects(page, page_rect, page_index, merged)
 
     def _render_clip(self, page: fitz.Page, page_rect: fitz.Rect, page_index: int,
-                     rect: fitz.Rect) -> ImageBlock:
+                     rect: fitz.Rect, pad: float = 2) -> ImageBlock:
         clip = fitz.Rect(
-            max(page_rect.x0, rect.x0 - 2), max(page_rect.y0, rect.y0 - 2),
-            min(page_rect.x1, rect.x1 + 2), min(page_rect.y1, rect.y1 + 2),
+            max(page_rect.x0, rect.x0 - pad), max(page_rect.y0, rect.y0 - pad),
+            min(page_rect.x1, rect.x1 + pad), min(page_rect.y1, rect.y1 + pad),
         )
         img_bytes = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False).tobytes("png")
         x0 = clip.x0 * 25.4 / 72
