@@ -157,7 +157,10 @@ class ConversionPipeline:
 
         # 「行测-删除所选模块」: 必须在空题目检查之前完成 —— 删完可能一题不剩
         drop_sections = overrides.get("drop_sections") or []
-        excluded_ranges = self._filter_sections(cleaned, drop_sections, exam_type, progress)
+        excluded_ranges = self._filter_sections(
+            cleaned, drop_sections, exam_type, progress,
+            renumber_questions=bool(overrides.get("renumber_questions", False)),
+        )
 
         if not cleaned.questions and not cleaned.shenlun_questions and not cleaned.materials:
             raise ValueError(
@@ -216,8 +219,11 @@ class ConversionPipeline:
 
     def _filter_sections(self, doc: CleanedDocument, drop_sections: list[str],
                          exam_type: str,
-                         progress: Callable[[int, str], None] = None) -> list[tuple]:
-        """删除所选行测模块，并把剩余题号/模块序号/答案区位置全部递补。
+                         progress: Callable[[int, str], None] = None,
+                         renumber_questions: bool = False) -> list[tuple]:
+        """删除所选行测模块，并递补模块序号与答案区位置。
+
+        题号默认保持原卷编号；renumber_questions=True 时从 1 连续重排。
 
         返回被删内容在源 PDF 上的坐标区间 [(起页, 起y, 止页, 止y), ...]，
         供上层把落在区间里的图片（资料分析表格、图形推理选项图）一并剔除 ——
@@ -287,9 +293,11 @@ class ConversionPipeline:
         ]
         doc.answer_sections = remapped
 
-        # ── 题号递补: 从 1 连续重排（行测整卷题号本来就是连续的）
-        for new_number, question in enumerate(kept, start=1):
-            question.number = new_number
+        # ── 题号处理: 默认保持原卷编号（便于按原题号对答案/回看），
+        #    用户勾选"从 1 连续递补"时才重排
+        if renumber_questions:
+            for new_number, question in enumerate(kept, start=1):
+                question.number = new_number
 
         # ── 模块序号递补（"五. 判断推理" → "四. 判断推理"）+ 资料分析标记重算
         has_module_heading = any(

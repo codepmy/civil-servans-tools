@@ -1,20 +1,30 @@
 """右侧设置面板: 调整排版参数(字体/字号/行距/边距等)。"""
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
     QDoubleSpinBox, QCheckBox, QPushButton, QGroupBox,
     QScrollArea, QRadioButton, QSpinBox,
 )
-from PyQt6.QtCore import pyqtSignal, QEvent, QObject
+from PyQt6.QtCore import pyqtSignal, QEvent, QObject, Qt
 
 
 # ============================================================
-# 滚轮事件过滤器: 阻止鼠标滚轮修改 QSpinBox/QComboBox 的值
+# 滚轮事件过滤器: 阻止滚轮修改输入控件的值，同时保留面板滚动
 # ============================================================
 class _WheelBlockFilter(QObject):
-    """拦截滚轮事件。"""
+    """拦截 QSpinBox/QComboBox 的滚轮事件。
+
+    这两类控件默认会“吃掉”滚轮（数字框改值、下拉框切换选项），
+    但直接吞掉会导致光标停在输入框上时整个设置面板滚不动。
+    这里改为把滚轮转发给外层 QScrollArea：值不变，面板照常滚动。
+    """
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Wheel:
+            parent = obj.parent()
+            while parent is not None and not isinstance(parent, QScrollArea):
+                parent = parent.parent()
+            if parent is not None:
+                QApplication.sendEvent(parent.viewport(), event)
             return True
         return super().eventFilter(obj, event)
 
@@ -41,14 +51,61 @@ PRESET_LIANKAO = {
 PAPER_SIZES = ["A4", "B5", "A3", "B4", "16开"]
 
 # 「行测模块删除」勾选项: (传给流水线的模块名, 界面文字)
+# 界面文字统一取四字简称，才能排成整齐的两列卡片；完整名称放在 tooltip 里。
 DROP_SECTION_ITEMS = [
-    ("政治理论", "删除 政治理论"),
-    ("常识判断", "删除 常识判断"),
-    ("言语理解与表达", "删除 言语理解与表达"),
-    ("数量关系", "删除 数量关系"),
-    ("判断推理", "删除 判断推理"),
-    ("资料分析", "删除 资料分析"),
+    ("政治理论", "政治理论"),
+    ("常识判断", "常识判断"),
+    ("言语理解与表达", "言语理解"),
+    ("数量关系", "数量关系"),
+    ("判断推理", "判断推理"),
+    ("资料分析", "资料分析"),
 ]
+
+# 模块卡片样式: 白底圆角卡片，悬停浅灰，勾选后整卡变 Indigo 浅底
+DROP_CHECK_STYLE = """
+QCheckBox#drop-section {
+    background-color: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 8px 8px;
+    spacing: 6px;
+    font-size: 12px;
+    color: #374151;
+}
+QCheckBox#drop-section:hover {
+    background-color: #F9FAFB;
+    border-color: #C7D2FE;
+}
+QCheckBox#drop-section:checked {
+    background-color: #EEF2FF;
+    border-color: #A5B4FC;
+    color: #4338CA;
+    font-weight: 600;
+}
+"""
+
+# 「清空所选」: 描边小按钮，避免原来纯文字链接过于不起眼
+DROP_CLEAR_STYLE = """
+QPushButton#drop-clear {
+    background-color: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #4B5563;
+    min-height: 22px;
+}
+QPushButton#drop-clear:hover {
+    background-color: #FEF2F2;
+    border-color: #FCA5A5;
+    color: #B91C1C;
+}
+QPushButton#drop-clear:pressed {
+    background-color: #FEE2E2;
+    border-color: #FCA5A5;
+}
+"""
 
 # 面向行测/申论密集排版的默认边距，优先扩大正文可用宽度。
 PAPER_MARGIN_PRESETS = {
@@ -95,19 +152,72 @@ class SettingsPanel(QWidget):
         layout.addWidget(grp_type)
 
         # === 行测模块删除 ===
-        grp_drop = QGroupBox("行测模块删除（不输出所选模块）")
+        grp_drop = QGroupBox("行测模块删除")
         dp_layout = QVBoxLayout(grp_drop)
-        dp_hint = QLabel("勾选后该模块整段（标题、题目、图表）不输出，剩余题号与模块序号自动递补。")
+        dp_layout.setSpacing(6)
+
+        dp_hint = QLabel("✂ 勾选后整段不输出（标题、题目、图表），模块序号自动递补")
         dp_hint.setWordWrap(True)
         dp_hint.setStyleSheet("color: #6B7280; font-size: 11px;")
         dp_layout.addWidget(dp_hint)
+
+        dp_grid = QGridLayout()
+        dp_grid.setHorizontalSpacing(6)
+        dp_grid.setVerticalSpacing(6)
+        dp_grid.setColumnStretch(0, 1)
+        dp_grid.setColumnStretch(1, 1)
         self._drop_checks: dict[str, QCheckBox] = {}
-        for key, label in DROP_SECTION_ITEMS:
+        for index, (key, label) in enumerate(DROP_SECTION_ITEMS):
             chk = QCheckBox(label)
-            chk.setToolTip("转换时删除该模块；合并式标题（如「政治理论/常识判断」）勾选任一即整段删除")
+            chk.setObjectName("drop-section")
+            chk.setStyleSheet(DROP_CHECK_STYLE)
+            chk.setToolTip(
+                f"转换时删除「{key}」模块；合并式标题（如「政治理论/常识判断」）"
+                "勾选任一即整段删除"
+            )
             chk.toggled.connect(self._on_config_changed)
-            dp_layout.addWidget(chk)
+            dp_grid.addWidget(chk, index // 2, index % 2)
             self._drop_checks[key] = chk
+        dp_layout.addLayout(dp_grid)
+
+        # 删除后的题号处理: 默认保留原卷编号，便于按原题号对答案
+        dp_number_label = QLabel("删除后的题号:")
+        dp_number_label.setStyleSheet("color: #6B7280; font-size: 11px;")
+        dp_layout.addWidget(dp_number_label)
+
+        self.radio_keep_numbers = QRadioButton("保持原卷题号（推荐）")
+        self.radio_keep_numbers.setToolTip(
+            "删除模块后，剩余题目沿用原卷题号，便于按原题号对答案、回看解析"
+        )
+        self.radio_keep_numbers.setChecked(True)
+        self.radio_keep_numbers.toggled.connect(self._on_config_changed)
+        dp_layout.addWidget(self.radio_keep_numbers)
+
+        self.radio_renumber = QRadioButton("从第 1 题连续递补")
+        self.radio_renumber.setToolTip("删除模块后，剩余题目从第 1 题重新连续编号")
+        self.radio_renumber.toggled.connect(self._on_config_changed)
+        dp_layout.addWidget(self.radio_renumber)
+
+        # 底部状态行: 已选数量提示 + 一键清空
+        self._drop_footer = QWidget()
+        dp_footer_layout = QHBoxLayout(self._drop_footer)
+        dp_footer_layout.setContentsMargins(0, 0, 0, 0)
+        dp_footer_layout.setSpacing(4)
+        self._drop_summary = QLabel()
+        self._drop_summary.setWordWrap(True)
+        self._drop_summary.setStyleSheet(
+            "color: #B45309; font-size: 11px; font-weight: 600;"
+        )
+        dp_footer_layout.addWidget(self._drop_summary, 1)
+        self._btn_clear_drop = QPushButton("清空所选")
+        self._btn_clear_drop.setObjectName("drop-clear")
+        self._btn_clear_drop.setStyleSheet(DROP_CLEAR_STYLE)
+        self._btn_clear_drop.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_clear_drop.clicked.connect(self._clear_drop_sections)
+        dp_footer_layout.addWidget(self._btn_clear_drop)
+        self._drop_footer.setVisible(False)
+        dp_layout.addWidget(self._drop_footer)
+
         layout.addWidget(grp_drop)
         self._grp_drop = grp_drop
 
@@ -265,6 +375,12 @@ class SettingsPanel(QWidget):
         c = QComboBox()
         c.addItems(items)
         c.setStyleSheet(COMBOBOX_STYLE)
+        # 字体名可能很长（如 "Noto Sans SC Medium"），不能让最长条目撑开
+        # 下拉框的最小宽度，否则窄窗口下会把设置列挤出横向滚动条
+        c.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        c.setMinimumContentsLength(6)
         c.installEventFilter(_wheel_blocker)
         return c
 
@@ -336,8 +452,10 @@ class SettingsPanel(QWidget):
         self.chk_keep_last_page.setChecked(False)
         for chk in self._drop_checks.values():
             chk.setChecked(False)
+        self._set_renumber_choice(False)
         self._apply_paper_margins(self.combo_paper.currentText())
         self._update_drop_enabled()
+        self._refresh_drop_ui()
 
     def get_config(self) -> dict:
         template_map = {0: "xingce", 1: "shenlun"}
@@ -360,6 +478,7 @@ class SettingsPanel(QWidget):
             "drop_sections": [
                 key for key, chk in self._drop_checks.items() if chk.isChecked()
             ],
+            "renumber_questions": self.radio_renumber.isChecked(),
             "margin_top": self._margin_spins["spin_margin_top"].value(),
             "margin_bottom": self._margin_spins["spin_margin_bottom"].value(),
             "margin_left": self._margin_spins["spin_margin_left"].value(),
@@ -440,11 +559,47 @@ class SettingsPanel(QWidget):
                 chk.setChecked(key in selected)
                 chk.blockSignals(old)
 
+        renumber = config.get("renumber_questions")
+        if renumber is not None:
+            self._set_renumber_choice(bool(renumber))
+
         self._on_config_changed()
 
     def _on_config_changed(self, *args):
         self._update_drop_enabled()
+        self._refresh_drop_ui()
         self.config_changed.emit(self.get_config())
+
+    def _set_renumber_choice(self, renumber: bool):
+        """静默设置题号处理方式。
+
+        两个 QRadioButton 自动互斥，切换时会互相触发 toggled，必须同时
+        屏蔽两者的信号，避免回填配置时产生多次 config_changed。
+        """
+        old_renumber = self.radio_renumber.blockSignals(True)
+        old_keep = self.radio_keep_numbers.blockSignals(True)
+        self.radio_renumber.setChecked(renumber)
+        self.radio_keep_numbers.setChecked(not renumber)
+        self.radio_keep_numbers.blockSignals(old_keep)
+        self.radio_renumber.blockSignals(old_renumber)
+
+    def _refresh_drop_ui(self):
+        """刷新"已选 N 个模块"提示与清空按钮的可见性。"""
+        selected = [key for key, chk in self._drop_checks.items() if chk.isChecked()]
+        self._drop_footer.setVisible(bool(selected))
+        if selected:
+            self._drop_summary.setText(f"将删除 {len(selected)} 个模块")
+
+    def _clear_drop_sections(self):
+        """一键取消全部模块删除勾选。"""
+        selected = [chk for chk in self._drop_checks.values() if chk.isChecked()]
+        if not selected:
+            return
+        for chk in selected:
+            old = chk.blockSignals(True)
+            chk.setChecked(False)
+            chk.blockSignals(old)
+        self._on_config_changed()
 
     def _update_drop_enabled(self):
         """模块删除只对行测有效: 选申论时整组隐藏并清空勾选。

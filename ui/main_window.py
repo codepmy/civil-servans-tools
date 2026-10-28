@@ -480,14 +480,19 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.settings_panel = SettingsPanel(self._fonts)
-        self.settings_panel.setMinimumWidth(250)
-        self.settings_panel.setMaximumWidth(350)
+        # 设置列需要容纳两列模块卡片和整行单选项，250px 会把内容挤出横向滚动条
+        self.settings_panel.setMinimumWidth(300)
+        self.settings_panel.setMaximumWidth(400)
 
         self.preview_panel = PreviewPanel()
 
         splitter.addWidget(self.preview_panel)
         splitter.addWidget(self.settings_panel)
-        splitter.setSizes([1050, 300])
+        # 预览区吸收窗口多余宽度，设置列保持稳定宽度；窗口缩小时也不会先被压窄
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setCollapsible(1, False)
+        splitter.setSizes([1000, 340])
 
         layout.addWidget(splitter)
         return page
