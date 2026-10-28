@@ -1,10 +1,10 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "authorName": "CodePmy",
   "authorEmail": "codepmy@163.com",
   "updateInfoUrl": "https://gitee.com/peisuer/civil-servans-tools/raw/master/version.json",
   "releaseDate": "2026-10-18",
-  "changelog": "✨ 修复已知部分场景bug、增加转换扫描件pdf时提示“不支持”",
+  "changelog": "✨ - 模块删除改为两列卡片，新增“清空所选”按钮\n- 新增题号处理单选：保持原卷题号（默认）或从 1 连续递补\n- 设置列固定为稳定宽度，修复小窗口下右侧内容被横向裁切\n- 输入框上的滚轮改为滚动设置面板，避免误改数值",
   "downloadUrl": "https://pan.quark.cn/s/7c7150419ec9",
   "mandatory": false
 }

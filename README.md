@@ -8,8 +8,8 @@
 
 | 项目 | 内容                         |
 |------|----------------------------|
-| **版本号** | v1.2.2                     |
-| **发布日期** | 2026-10-18                 |
+| **版本号** | v1.2.3                     |
+| **发布日期** | 2026-10-28                 |
 | **运行平台** | Windows 10 / 11（64 位）      |
 | **Python 版本** | 3.10+   < 3.13 (OCR场景依赖限制) |
 | **开源协议** | MIT License                |
@@ -130,15 +130,15 @@
 
 ## 立即下载 Windows 安装包
 
-> 国内用户优先使用夸克网盘 / 百度网盘下载，打开链接后直接下载 `CivilServansTools-v1.2.2-x64.exe`，速度通常比 GitHub Release 更稳、更接近满速。
+> 国内用户优先使用夸克网盘 / 百度网盘下载，打开链接后直接下载 `CivilServansTools-v1.2.3-x64.exe`，速度通常比 GitHub Release 更稳、更接近满速。
 
 | 下载入口 | 推荐人群 | 链接                                                                                   |
 | --- | --- |--------------------------------------------------------------------------------------|
 | 夸克网盘 | 国内用户优先 | [夸克网盘下载](https://pan.quark.cn/s/7c7150419ec9)                                        |
 | 百度网盘 | 国内用户优先 | [百度网盘下载（提取码 tjpr）](https://pan.baidu.com/s/1C7ibqxXT-8DwUsYxj8e-Hg?pwd=tjpr)         |
-| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.2.2 Release](https://github.com/codepmy/civil-servans-tools/releases/tag/v1.2.2) |
+| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.2.3 Release](https://github.com/codepmy/civil-servans-tools/releases/tag/v1.2.3) |
 
-安装时只需要下载并运行 `CivilServansTools-v1.2.2-x64.exe`。
+安装时只需要下载并运行 `CivilServansTools-v1.2.3-x64.exe`。
 
 ## 🛠️ 技术栈
 
